@@ -149,15 +149,13 @@ class Overlay:
 
         # Text label (right).
         # Layout goals:
-        #   - Short text (e.g. 2 chars) → 1 line, centered.  The old
-        #     code forced `set_lines(2)` which made "你好" split into
-        #     "你" / "好" on two lines, looking broken.
-        #   - Long text → wrap to ≤ 2 lines, both lines centered.  The
-        #     old code used `set_xalign(0.0)` so the wrapped block was
-        #     flush-left, leaving a "locked left" look with empty space
-        #     on the right.
-        #   - Head ellipsis (Pango.EllipsizeMode.START=1) keeps the
-        #     newest words visible as the ASR stream grows.
+        #   - Short text (e.g. 2 chars) → 1 line, centered.
+        #   - Long text → wrap to ≤ 2 lines, both lines centered.
+        # We deliberately do NOT use set_ellipsize(START): combined with
+        # max_width_chars + wrap + hexpand, GTK 4 / Pango renders the
+        # whole line as a single "…" (treating wrap as "all fits in
+        # one line" and ellipsizing from the start).  Truncation is
+        # already handled in _refresh_label via text[-600:].
         label = Gtk.Label()
         label.set_xalign(0.5)            # center within the label box
         label.set_yalign(0.5)
@@ -166,7 +164,8 @@ class Overlay:
         label.set_wrap_mode(0)           # Pango.WrapMode.WORD
         label.set_max_width_chars(40)
         # NO set_lines(2): let Pango lay out 1 or 2 lines naturally.
-        label.set_ellipsize(1)           # Pango.EllipsizeMode.START
+        # NO set_ellipsize: see comment above; would force "…" in some
+        # widths even when text is short.
         label.set_hexpand(True)          # let label take full row width
         label.set_halign(Gtk.Align.CENTER)
         self._label = label
