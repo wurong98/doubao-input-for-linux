@@ -23,8 +23,8 @@ from gi.repository import GLib, Gdk, Gtk  # type: ignore
 
 logger = logging.getLogger(__name__)
 
-OVERLAY_WIDTH = 520
-OVERLAY_HEIGHT = 64
+OVERLAY_WIDTH = 560
+OVERLAY_HEIGHT = 76  # taller: 1 short line uses ~40px, 2 lines fit comfortably
 WAVE_BARS = 24           # number of bars in the scrolling waveform
 WAVE_BAR_W = 4           # width per bar
 WAVE_BAR_GAP = 3         # gap between bars
@@ -148,19 +148,27 @@ class Overlay:
         box.append(wave)
 
         # Text label (right).
-        # Use multi-line wrap + head ellipsis (Pango.EllipsizeMode.START=1)
-        # so that as the ASR stream grows past the available width we
-        # always see the *latest* words and the *oldest* words get
-        # replaced by "…", instead of the end being silently truncated
-        # (which used to hide the most recently recognised text).
+        # Layout goals:
+        #   - Short text (e.g. 2 chars) → 1 line, centered.  The old
+        #     code forced `set_lines(2)` which made "你好" split into
+        #     "你" / "好" on two lines, looking broken.
+        #   - Long text → wrap to ≤ 2 lines, both lines centered.  The
+        #     old code used `set_xalign(0.0)` so the wrapped block was
+        #     flush-left, leaving a "locked left" look with empty space
+        #     on the right.
+        #   - Head ellipsis (Pango.EllipsizeMode.START=1) keeps the
+        #     newest words visible as the ASR stream grows.
         label = Gtk.Label()
-        label.set_xalign(0.0)
+        label.set_xalign(0.5)            # center within the label box
         label.set_yalign(0.5)
+        label.set_justify(Gtk.Justification.CENTER)
         label.set_wrap(True)
-        label.set_wrap_mode(0)  # Pango.WrapMode.WORD
+        label.set_wrap_mode(0)           # Pango.WrapMode.WORD
         label.set_max_width_chars(40)
-        label.set_lines(2)
-        label.set_ellipsize(1)  # Pango.EllipsizeMode.START
+        # NO set_lines(2): let Pango lay out 1 or 2 lines naturally.
+        label.set_ellipsize(1)           # Pango.EllipsizeMode.START
+        label.set_hexpand(True)          # let label take full row width
+        label.set_halign(Gtk.Align.CENTER)
         self._label = label
         box.append(label)
 
