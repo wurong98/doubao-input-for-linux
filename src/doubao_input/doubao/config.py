@@ -44,7 +44,7 @@ AUTH_ERROR_KEYWORDS = [
 
 # --- Paths ---
 
-CONFIG_DIR_NAME = "doubao-murmur"
+CONFIG_DIR_NAME = "doubao-input"
 PARAMS_FILE = "asr_params.json"
 KEYBOARD_FILE = "keyboard.json"
 

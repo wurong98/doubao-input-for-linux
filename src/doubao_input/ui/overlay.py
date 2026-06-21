@@ -16,6 +16,8 @@ from typing import Optional
 
 import gi
 
+import cairo  # used to render ImageSurface that we then wrap in Gdk.Texture
+
 gi.require_version("Gtk", "4.0")
 from gi.repository import GLib, Gdk, Gtk  # type: ignore
 
@@ -68,11 +70,13 @@ class Overlay:
         self._text = text
         if self._window:
             self._refresh_label()
+            self._arm_redraw()  # re-render wave (shape depends on has_text)
 
     def set_status(self, status: str) -> None:
         self._status_text = status
         if self._window:
             self._refresh_label()
+            self._arm_redraw()
 
     def push_rms(self, rms: float) -> None:
         self._bars.append(max(0.0, min(1.0, rms)))
@@ -125,11 +129,17 @@ class Overlay:
         box.set_margin_top(8)
         box.set_margin_bottom(8)
 
-        # Waveform drawing area (left)
-        wave = Gtk.DrawingArea()
+        # Waveform area (left): use Gtk.Picture with a Gdk.Texture built
+        # from a cairo ImageSurface. We render to ImageSurface in Python
+        # (no PyGObject cairo.Context pass-through needed) and only
+        # touch Gdk.Texture/Gtk.Picture from Python.
+        wave = Gtk.Picture()
         wave.set_size_request(WAVE_BARS * (WAVE_BAR_W + WAVE_BAR_GAP) + 4, 40)
-        wave.set_draw_func(self._draw_wave)
+        wave.set_can_shrink(False)
         self._wave = wave
+        self._wave_tex: Optional[Gdk.Texture] = None
+        # Initial blank frame
+        self._upload_wave_texture()
         box.append(wave)
 
         # Text label (right)
@@ -162,33 +172,108 @@ class Overlay:
         if not self._visible or not self._wave:
             self._redraw_src = None
             return False
-        self._wave.queue_draw()
+        self._upload_wave_texture()
         return True  # keep running
 
-    def _draw_wave(self, area, cr, w, h) -> None:
-        # Dark semi-transparent background with rounded corners
+    def _upload_wave_texture(self) -> None:
+        """Render current bars to a cairo ImageSurface, then wrap it in
+        a Gdk.Texture and assign to the Gtk.Picture. No draw_func, no
+        PyGObject cairo.Context pass-through → no foreign-struct errors."""
+        if self._wave is None:
+            return
         try:
+            import cairo as _cairo
+            bars = list(self._bars)
+            has_text = bool(self._text)
+            max_bar_h = WAVE_BAR_MAX_H if not has_text else 18
+            cw = WAVE_BARS * (WAVE_BAR_W + WAVE_BAR_GAP) + 4
+            ch = 40
+            surf = _cairo.ImageSurface(_cairo.FORMAT_ARGB32, cw, ch)
+            cr = _cairo.Context(surf)
+            # background
             cr.set_source_rgba(0.10, 0.10, 0.12, 0.92)
-            radius = 18.0
-            _rounded_rect(cr, 0, 0, w, h, radius)
+            _rounded_rect(cr, 0, 0, cw, ch, 12.0)
             cr.fill()
+            # bars
+            n = len(bars)
+            if n > 0:
+                cx0 = (cw - n * (WAVE_BAR_W + WAVE_BAR_GAP)) / 2
+                for i, v in enumerate(bars):
+                    bh = max(2.0, v * max_bar_h)
+                    x = cx0 + i * (WAVE_BAR_W + WAVE_BAR_GAP)
+                    y = (ch - bh) / 2
+                    alpha = 0.55 + 0.45 * v
+                    cr.set_source_rgba(0.45, 0.85, 0.55, alpha)
+                    _rounded_rect(cr, x, y, WAVE_BAR_W, bh, 1.5)
+                    cr.fill()
+            # cairo ImageSurface → Gdk.Texture (no PyGObject cairo
+            # foreign-struct conversion needed; Gdk.Texture accepts
+            # raw bytes via new_from_bytes).
+            stride = cairo.ImageSurface.format_stride_for_width(
+                _cairo.FORMAT_ARGB32, cw
+            )
+            data = surf.get_data()  # bytes
+            # Gdk.Texture.new_from_bytes expects a GBytes wrapping a
+            # memory buffer in RGBA (GTK expects RGBA on the wire, but
+            # Cairo ARGB32 is BGRA on little-endian). For our flat-color
+            # background + green bars the channel swap is invisible, but
+            # to be safe we explicitly swap R/B.
+            import array as _arr
+            arr = _arr.array("B", data)
+            # ARGB32 in Cairo's layout = [B, G, R, A] on little-endian.
+            # GTK expects [R, G, B, A]. Swap bytes 0<->2.
+            for i in range(0, len(arr), 4):
+                arr[i], arr[i + 2] = arr[i + 2], arr[i]
+            gbytes = GLib.Bytes.new(bytes(arr))
+            tex = Gdk.Texture.new_from_bytes(gbytes, cw, ch, stride)
+            self._wave.set_paintable(tex)
+            self._wave_tex = tex
         except Exception:
+            # Drawing is purely cosmetic; never let it kill the overlay.
             pass
 
-        bars = list(self._bars)
-        n = len(bars)
-        if n == 0:
-            return
-        cx0 = (w - n * (WAVE_BAR_W + WAVE_BAR_GAP)) / 2
-        for i, v in enumerate(bars):
-            bh = max(2.0, v * WAVE_BAR_MAX_H)
-            x = cx0 + i * (WAVE_BAR_W + WAVE_BAR_GAP)
-            y = (h - bh) / 2
-            # Soft gradient look: alpha based on height
-            alpha = 0.55 + 0.45 * v
-            cr.set_source_rgba(0.45, 0.85, 0.55, alpha)
-            _rounded_rect(cr, x, y, WAVE_BAR_W, bh, 1.5)
-            cr.fill()
+    def _draw_wave(self, area, cr, w, h) -> None:
+        # GTK4 PyGObject draw_func callbacks receive cairo.Context, but the
+        # type converter registration is broken in several Ubuntu/PyGObject
+        # versions (produces "Couldn't find foreign struct converter for
+        # 'cairo.Context'"). Render to an ImageSurface first, then draw
+        # the texture via cairo.set_source_surface — that path goes
+        # through pixman, not PyGObject's struct converter.
+        try:
+            import cairo as _cairo
+            bars = list(self._bars)
+            n = len(bars)
+            # Decide visual layout: when text exists, bars shrink to left
+            has_text = bool(self._text)
+            max_bar_h = WAVE_BAR_MAX_H if not has_text else 18
+            cw = max(w, 1)
+            ch = max(h, 1)
+            surf = _cairo.ImageSurface(_cairo.FORMAT_ARGB32, cw, ch)
+            inner = _cairo.Context(surf)
+            # background
+            inner.set_source_rgba(0.10, 0.10, 0.12, 0.92)
+            _rounded_rect(inner, 0, 0, cw, ch, 18.0)
+            inner.fill()
+            # bars
+            if n > 0:
+                cx0 = (cw - n * (WAVE_BAR_W + WAVE_BAR_GAP)) / 2
+                for i, v in enumerate(bars):
+                    bh = max(2.0, v * max_bar_h)
+                    x = cx0 + i * (WAVE_BAR_W + WAVE_BAR_GAP)
+                    y = (ch - bh) / 2
+                    alpha = 0.55 + 0.45 * v
+                    inner.set_source_rgba(0.45, 0.85, 0.55, alpha)
+                    _rounded_rect(inner, x, y, WAVE_BAR_W, bh, 1.5)
+                    inner.fill()
+            # blit the rendered surface onto the widget's cairo context
+            cr.set_source_surface(surf, 0, 0)
+            cr.paint()
+        except Exception as e:
+            # Never let draw errors spam logs or crash the overlay.
+            # (Earlier versions of this code raised the PyGObject
+            # "foreign struct converter" error every redraw; catching
+            # here is the safe fallback.)
+            pass
 
 
 def _rounded_rect(cr, x, y, w, h, r) -> None:

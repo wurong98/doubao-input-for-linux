@@ -200,6 +200,13 @@ class ControlWindow:
         check_btn.connect("clicked", lambda *_: self._on_check_mic())
         box.append(check_btn)
 
+        # Diagnostic button: inject a fixed string via the same path the
+        # voice pipeline uses. Lets the user verify wl-copy + uinput Ctrl+V
+        # end-to-end without having to log in first.
+        test_btn = Gtk.Button.new_with_label("测试粘贴 (注入 'hello 测试 123')")
+        test_btn.connect("clicked", lambda *_: self._on_test_inject())
+        box.append(test_btn)
+
         help = Gtk.Label()
         help.set_xalign(0.0)
         help.set_yalign(0.0)

@@ -1,0 +1,1 @@
+PYTHONPATH=src .venv/bin/python -m doubao_input

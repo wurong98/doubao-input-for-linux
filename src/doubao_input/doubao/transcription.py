@@ -191,10 +191,12 @@ class TranscriptionManager:
         if self.app_state.recording_state == RecordingState.IDLE:
             return GLib.SOURCE_REMOVE
         logger.error("ASR error: %s", error)
-        if self.using_cached_params:
-            self._handle_auth_failure()
-            return GLib.SOURCE_REMOVE
-        self.app_state.error_message = "连接出错"
+        # NOTE: genuine auth failures arrive via `on_auth_error` -> `_on_auth_error`,
+        # which calls `_handle_auth_failure()` and re-prompts login. A generic ASR
+        # error (connection refused, timeout, DNS, proxy down, etc.) must NOT be
+        # treated as auth failure — doing so wipes cached cookies and pops the
+        # login window every time the network/proxy is unavailable.
+        self.app_state.error_message = "连接出错,请检查网络后重试"
         GLib.timeout_add(int(AUTH_EXPIRY_DELAY * 1000), self._reset_to_idle)
         return GLib.SOURCE_REMOVE
 
