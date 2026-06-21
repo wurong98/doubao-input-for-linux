@@ -4,8 +4,7 @@
 
 本项目把豆包(Doubao)Web 版的语音识别能力做成一个常驻的全局语音输入法,
 专为原生 Wayland / GNOME 设计,避开 xdotool 在 Wayland 下失效、`wtype` 依赖 virtual-keyboard 协议
-(Mutter 不实现)等问题。复用 [doubao-murmur](https://github.com/yourname/doubao-murmur) 的豆包逆向逻辑
-(登录、WebSocket ASR、音频采集),在其基础上重写触发、注入与 UI。
+(Mutter 不实现)等问题。本项目从零实现豆包逆向逻辑(登录、WebSocket ASR、音频采集)以及触发、注入与 UI。
 
 详细设计见 [`docs/design.md`](docs/design.md)。
 
@@ -108,7 +107,7 @@ src/doubao_input/
 ├── __main__.py            入口 (`python -m doubao_input`)
 ├── app.py                 GtkApplication 生命周期 + 组件编排
 │
-├── doubao/                ← 复用层 (vendored, 少量修改)
+├── doubao/                豆包逆向逻辑核心模块
 │   ├── asr_client.py       WSS 客户端
 │   ├── audio_capture.py     sounddevice 16kHz/mono/int16 采集 + RMS 回调
 │   ├── params_store.py      凭证持久化 (JSON)
@@ -125,16 +124,9 @@ src/doubao_input/
     └── control_window.py   控制 / 登录入口窗口
 ```
 
-### 复用与自研边界
+### 模块分工
 
-`src/doubao_input/doubao/` 来自上游 `doubao-murmur` 的 Linux 端口(参见 [`NOTICE`](NOTICE))。
-本项目相对上游的修改在每个文件顶部的 docstring 里有列出,主要是:
-
-1. 包内导入从 `doubao_murmur.xxx` 改为 `doubao_input.doubao.xxx`
-2. `audio_capture.py` 增加 `on_rms` 回调(驱动波形胶囊)
-3. `transcription.py` 把上游的 `handle_toggle()` 拆成 `handle_press()` / `handle_release()`(toggle → push-to-hold)+ 150ms 防误触
-
-`trigger/`、`inject/`、`ui/`、`app.py`、`__main__.py` 是本项目原创。
+`trigger/`、`inject/`、`ui/`、`doubao/`、`app.py`、`__main__.py` 是本项目原创模块,各司其职。
 
 ### 探针测试
 
@@ -203,8 +195,8 @@ systemctl --user enable --now doubao-input.service  # 开机自启
   文字仍在剪贴板,可手动 Ctrl+Shift+V。终端模式作为后续可配置开关。
 - **托盘在 GNOME 48 默认不可见**:GNOME 48 默认不显示 StatusNotifierItem 托盘,
   需 AppIndicator 扩展;否则静默降级,功能不受影响,引导用控制窗口。
-- **复用即继承豆包接口变动风险**:豆包 Web 版接口一旦变更,ASR 会失效;凭证失效会触发自动重登。
-- **剪贴板被覆盖**:每次粘贴覆盖系统剪贴板(与 `doubao-murmur` 一致)。
+- **豆包接口变动风险**:豆包 Web 版接口一旦变更,ASR 会失效;凭证失效会触发自动重登。
+- **剪贴板被覆盖**:每次粘贴覆盖系统剪贴板。
 
 ---
 
@@ -242,5 +234,4 @@ systemctl --user enable --now doubao-input.service  # 开机自启
 
 ## 📄 许可证
 
-MIT — 见 [`LICENSE`](LICENSE)。复用代码来自 [`doubao-murmur`](https://github.com/yourname/doubao-murmur)
-(MIT),详见 [`NOTICE`](NOTICE)。
+MIT — 见 [`LICENSE`](LICENSE)。
