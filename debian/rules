@@ -25,14 +25,21 @@ override_dh_auto_install:
 	    -exec rm -rf {} + 2>/dev/null || true
 	find debian/doubao-input/usr/lib/python3 -name '*.pyc' -delete || true
 
-	# Wrapper script
+	# Wrapper script (avoid make's per-line shell; use printf)
 	install -d debian/doubao-input/usr/bin
-	cat > debian/doubao-input/usr/bin/doubao-input <<'EOF'
-#!/bin/sh
-# Wrapper for the doubao-input voice IME.
-# Reads system-installed package from /usr/lib/python3/dist-packages.
-exec python3 -m doubao_input "$@"
-EOF
+	printf '%s\n' \
+	    '#!/bin/sh' \
+	    '# Wrapper for the doubao-input voice IME.' \
+	    '# Pure-Python deps (websockets, sounddevice, evdev) live in' \
+	    '# the per-user venv at ~/.local/share/doubao-input/.venv' \
+	    '# (created by postinst); system Python provides gi / Gtk / WebKit.' \
+	    'VENV="$$HOME/.local/share/doubao-input/.venv"' \
+	    'if [ -x "$$VENV/bin/python3" ]; then' \
+	    '    exec "$$VENV/bin/python3" -m doubao_input "$$@"' \
+	    'else' \
+	    '    exec python3 -m doubao_input "$$@"' \
+	    'fi' \
+	    > debian/doubao-input/usr/bin/doubao-input
 	chmod 0755 debian/doubao-input/usr/bin/doubao-input
 
 	# Systemd user service

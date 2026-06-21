@@ -64,4 +64,4 @@ build-dir/
 
 # Test/debug artifacts
 /tmp/
-/.cache/
+/.cache/doubao-input_*.deb
