@@ -14,7 +14,7 @@
 
 **项目图标**(128×128,安装到 hicolor,launcher 立即生效):
 
-![Logo](docs/images/logo.png)
+![Logo](src/doubao_input/resources/logo.png)
 
 **控制窗口** —— 启动 app 后的主面板:登录态、麦克风测试、注入测试、使用说明、退出按钮。
 
