@@ -50,43 +50,71 @@
 
 ## 🛠️ 安装
 
-### 1. 安装系统依赖
+### 普通用户(用 .deb)
+
+`.deb` 在 [`Releases`](https://github.com/wurong98/doubao-input-for-linux/releases)
+下载,或在仓库根跑 `bash packaging/build-deb.sh` 自打。**只需两步**:
 
 ```bash
-sudo apt install \
-    python3-gi gir1.2-gtk-4.0 gir1.2-webkit-6.0 \
-    python3-sounddevice python3-evdev python3-websockets \
-    wl-clipboard
+# 1. 装 .deb
+sudo apt install ./doubao-input_1.0.2-1_all.deb
+#   apt 会自动从 Depends 拉所有系统包(下面"完整依赖清单")
+#   postinst 会自动:
+#     - 把当前 sudo 用户加进 input 组
+#     - 创建用户级 venv 并 pip install 3 个 PyPI-only 包
+
+# 2. 重新登录(让 input 组生效)→ 然后跑
+doubao-input
+# 或开机自启:
+systemctl --user enable --now doubao-input.service
 ```
 
-### 2. 加入 `input` 组(关键)
+**完整 apt 依赖清单**(ubuntu 25.04+ 仓库,`.deb` 的 `Depends` 字段):
+
+| 包 | 用途 |
+|---|---|
+| `python3-gi` | PyGObject(GTK 绑定) |
+| `gir1.2-gtk-4.0` | GTK 4 typelib |
+| `gir1.2-webkit-6.0` | WebKitGTK 6.0 typelib(登录窗口) |
+| `libgtk-4-1` | GTK 4 运行时 |
+| `libwebkitgtk-6.0-4` | WebKitGTK 6.0 运行时 |
+| `wl-clipboard` | `wl-copy` / `wl-paste`(剪贴板读写) |
+| `init-system-helpers` | systemd 工具 |
+| `python3-pip` *(Recommends)* | postinst 装 venv 用 |
+| `python3-venv` *(Recommends)* | postinst 创建 venv 用 |
+
+**3 个 PyPI-only 依赖**(不在 apt,postinst 自动装到 `~/.local/share/doubao-input/.venv`):
+`websockets` / `sounddevice` / `evdev`
+
+> ⚠️ **必须重新登录**让 `input` 组生效,否则 evdev 读不到 `/dev/input/event*`、uinput 写不到 `/dev/uinput`,app 启动会立即报错。
+
+### 开发(从源码)
 
 ```bash
+git clone https://github.com/wurong98/doubao-input-for-linux.git
+cd doubao-input
+
+# 1. 系统依赖(同 .deb 依赖,这里要手动装)
+sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-webkit-6.0 \
+                 libgtk-4-1 libwebkitgtk-6.0-4 wl-clipboard
+
+# 2. 进 input 组
 sudo usermod -aG input $USER
-```
+#   ⚠️ 重登
 
-> ⚠️ **需要重新登录**才能生效。`/dev/uinput` 与 `/dev/input/event*` 都是 `root:input`,加入 `input` 组后免 sudo 即可读写。
-
-### 3. 创建虚拟环境并安装 Python 依赖
-
-```bash
+# 3. venv + Python 依赖
 python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt   # 见下方"开发"
-```
+.venv/bin/pip install -r requirements.txt
+#   requirements.txt 内容: websockets, sounddevice, evdev
 
-### 4. 跑起来
-
-```bash
+# 4. 跑
 ./start.sh
+#   等价于 PYTHONPATH=src .venv/bin/python -m doubao_input
 ```
 
-`start.sh` 等价于:
+### 首次使用
 
-```bash
-PYTHONPATH=src .venv/bin/python -m doubao_input
-```
-
-首次启动会弹出**登录窗口**,用 WebKitGTK 加载豆包网页;在 WebView 里登录成功后,
+启动后弹出**登录窗口**,用 WebKitGTK 加载豆包网页;在 WebView 里登录成功后,
 JS 拦截到登录态,自动从 `/alice/profile/self` 抓 cookies + 从 `localStorage` 抓 `device_id` / `web_id`,
 写入 `~/.config/doubao-input/asr_params.json`,登录窗口自动关闭。
 

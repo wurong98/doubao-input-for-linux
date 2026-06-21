@@ -26,7 +26,7 @@ dependencies = [
 ]
 
 [project.urls]
-"Source" = "https://github.com/yourname/doubao-input"
+"Source" = "https://github.com/wurong98/doubao-input-for-linux"
 
 [project.scripts]
 doubao-input = "doubao_input.__main__:main"

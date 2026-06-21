@@ -1,7 +1,7 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: doubao-input
 Upstream-Contact: code-dream@qq.com
-Source: https://github.com/yourname/doubao-input
+Source: https://github.com/wurong98/doubao-input-for-linux
 
 Files: *
 Copyright: 2026 doubao-input contributors

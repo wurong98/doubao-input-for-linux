@@ -5,7 +5,7 @@ Maintainer: doubao-input contributors <code-dream@qq.com>
 Build-Depends:
  debhelper-compat (= 13),
 Standards-Version: 4.6.2
-Homepage: https://github.com/yourname/doubao-input
+Homepage: https://github.com/wurong98/doubao-input-for-linux
 Rules-Requires-Root: no
 
 Package: doubao-input

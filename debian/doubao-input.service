@@ -1,6 +1,6 @@
 [Unit]
 Description=豆包语音输入法 (Doubao Input)
-Documentation=https://github.com/yourname/doubao-input
+Documentation=https://github.com/wurong98/doubao-input-for-linux
 After=graphical-session.target
 PartOf=graphical-session.target
 
