@@ -13,15 +13,15 @@
 
 ## 📸 截图
 
-**GNOME 启动器图标**(`.desktop` 通过绝对路径安装到 hicolor,launcher 立即生效):
+**项目图标**(128×128,安装到 hicolor,launcher 立即生效):
 
-![Launcher icon](docs/images/launcher-icon.png)
+![Logo](docs/images/logo.png)
 
 **控制窗口** —— 启动 app 后的主面板:登录态、麦克风测试、注入测试、使用说明、退出按钮。
 
 ![Control window](docs/images/control-window.png)
 
-> 启动器图标 + 启动 app 界面均来自 v1.0.1 真实运行环境(已在 Ubuntu 25.04 / GNOME 48 / Wayland 实测)。
+> 图标 + 启动 app 界面均来自 v1.0.1 真实运行环境(已在 Ubuntu 25.04 / GNOME 48 / Wayland 实测)。
 
 ---
 
