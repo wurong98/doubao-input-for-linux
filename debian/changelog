@@ -1,3 +1,34 @@
+doubao-input (1.0.1-1) noble; urgency=medium
+
+  * UI: PttOverlay rounded panel + breathing alpha + glint flash.
+    - Rounded 18px corners via CSS provider.
+    - Background alpha breathes 0.78~0.98 over 2.4s (opacity, not
+      saturation — keeps wallpaper visible without eye strain).
+    - Each new ASR word fires a 220ms opacity flash to 1.0 then
+      400ms decay back to the breathing baseline.  Causal feedback
+      makes the overlay feel alive without ever being noisy.
+    - High-contrast white bold text is never animated, so reading
+      stays stable while the edge glows.
+  * UI: layout bug fixes
+    - "你好" was wrapping to 2 lines (one char per line) — locked
+      the label to a hard 360px width via set_size_request +
+      set_width_chars(14) so Pango has a real break-width before
+      the first size allocation.
+    - Text appeared shifted right — box changed from HORIZONTAL
+      to VERTICAL so the label is centered under the wave, not
+      jammed against it.
+    - "整行变 …" — removed set_ellipsize(START), which conflicts
+      with wrap + max_width_chars + CJK WORD-wrap in GTK 4 /
+      Pango and turns the whole line into a single ellipsis.
+      Truncation is now handled in Python by text[-600:].
+  * Packaging: .desktop Icon= uses absolute path to bypass
+    GNOME Shell's per-session icon-theme cache.
+  * Packaging: .deb installs wrapper, systemd user service, logo
+    to hicolor theme, and postinst bootstraps a per-user venv
+    with pure-Python deps (websockets, sounddevice, evdev).
+
+ -- doubao-input contributors <code-dream@qq.com>  Sun, 21 Jun 2026 21:05:00 +0800
+
 doubao-input (1.0.0-1) noble; urgency=medium
 
   * Initial release.
