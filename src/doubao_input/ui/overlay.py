@@ -48,6 +48,9 @@ class Overlay:
 
     def show(self, status: str = "聆听中…") -> None:
         self._ensure_window()
+        # Reset per-round state so a 2nd PTT press never displays the
+        # tail of the 1st round's recognition text.
+        self._text = ""
         self._status_text = status
         self._refresh_label()
         if not self._visible:
@@ -90,7 +93,9 @@ class Overlay:
         win = Gtk.Window()
         win.set_title("doubao-input overlay")
         win.set_decorated(False)
-        win.set_resizable(False)
+        # Allow vertical resize so multi-line text can grow the window;
+        # we still cap width via the label's max_width_chars.
+        win.set_resizable(True)
         win.set_default_size(OVERLAY_WIDTH, OVERLAY_HEIGHT)
         # Critical: keep focus with the user's input field, not us.
         win.set_focus_on_click(False)
@@ -142,13 +147,20 @@ class Overlay:
         self._upload_wave_texture()
         box.append(wave)
 
-        # Text label (right)
+        # Text label (right).
+        # Use multi-line wrap + head ellipsis (Pango.EllipsizeMode.START=1)
+        # so that as the ASR stream grows past the available width we
+        # always see the *latest* words and the *oldest* words get
+        # replaced by "…", instead of the end being silently truncated
+        # (which used to hide the most recently recognised text).
         label = Gtk.Label()
         label.set_xalign(0.0)
         label.set_yalign(0.5)
-        label.set_ellipsize(3)  # Pango.EllipsizeMode.END
+        label.set_wrap(True)
+        label.set_wrap_mode(0)  # Pango.WrapMode.WORD
         label.set_max_width_chars(40)
-        label.set_single_line_mode(True)
+        label.set_lines(2)
+        label.set_ellipsize(1)  # Pango.EllipsizeMode.START
         self._label = label
         box.append(label)
 
@@ -159,7 +171,14 @@ class Overlay:
         if not self._label:
             return
         if self._text:
-            self._label.set_text(self._text)
+            # Defensive cap: don't let Pango chew on 100k chars of
+            # accumulated ASR output. The label already elides from the
+            # start so the user always sees the latest; the cap just
+            # keeps memory and layout cost bounded.
+            text = self._text
+            if len(text) > 600:
+                text = text[-600:]
+            self._label.set_text(text)
         else:
             self._label.set_text(self._status_text)
 
