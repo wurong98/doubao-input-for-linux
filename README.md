@@ -11,12 +11,27 @@
 
 ---
 
+## 📸 截图
+
+**GNOME 启动器图标**(`.desktop` 通过绝对路径安装到 hicolor,launcher 立即生效):
+
+![Launcher icon](docs/images/launcher-icon.png)
+
+**控制窗口** —— 启动 app 后的主面板:登录态、麦克风测试、注入测试、使用说明、退出按钮。
+
+![Control window](docs/images/control-window.png)
+
+> 启动器图标 + 启动 app 界面均来自 v1.0.1 真实运行环境(已在 Ubuntu 25.04 / GNOME 48 / Wayland 实测)。
+
+---
+
 ## ✨ 特性
 
 - **按住即说,松手即输** —— push-to-hold 交互,右 Ctrl 物理键触发。
 - **GNOME / Wayland 原生可用** —— 用 `evdev` 监听 + `uinput` 模拟,不依赖 X11/XWayland。
 - **中文 OK** —— 走剪贴板 + 模拟 Ctrl+V,不靠逐键输入。
-- **波形胶囊悬浮窗** —— 屏幕顶部居中,按住时显示实时音量波形 + 实时识别文字。
+- **圆角胶囊悬浮窗** —— 18px 圆角 + 1.5px 白边 + 呼吸 alpha(0.78~0.98 / 2.4s 周期)
+  + 每识别出新字触发 220ms 流光闪烁;文字始终纯白粗体不参与动效,保证可读。
 - **会话常驻** —— `systemd --user` 自启;再次启动唤起控制窗口(单实例)。
 - **凭证本地化** —— 登录一次,凭证写在 `~/.config/doubao-input/asr_params.json`,复用至下次。
 - **零 sudo 运行** —— 仅需把用户加入 `input` 组(`.deb` 的 `postinst` 自动处理)。
@@ -154,17 +169,31 @@ paste: uinput ok (shift=False, gap=12ms)
 
 ---
 
-## 📤 打包(计划中)
+## 📤 打包
 
-目标:`.deb` 包 + systemd user service 常驻。
+提供 `.deb` 包 + systemd user service 常驻,版本号见
+[`debian/changelog`](debian/changelog)。
 
-- 程序装到 `/opt/doubao-input/` 或 `/usr/lib/doubao-input/`
-- `debian/control` 的 `Depends:` 列出 apt 系统包
-- `postinst` 自动 `usermod -aG input $SUDO_USER` 并提示重登
-- 提供 `doubao-input.service` (`systemctl --user enable --now`)
-- 提供 `doubao-input.desktop` 唤起控制窗口
+```bash
+# 打包(在仓库根)
+bash packaging/build-deb.sh
+# → 生成 doubao-input_<version>_all.deb
 
-详见 [`docs/design.md`](docs/design.md) §7。
+# 安装
+sudo dpkg -i doubao-input_*.deb
+# postinst 会自动:
+#   - 把当前用户加入 input 组(需要重新登录)
+#   - 创建用户级 venv: ~/.local/share/doubao-input/.venv
+#   - 装 Python 依赖: websockets / sounddevice / evdev
+#   - 拷贝头像到 hicolor 图标主题
+#   - 拷贝 .desktop / .service
+
+# 启动
+doubao-input                          # 直接跑
+systemctl --user enable --now doubao-input.service  # 开机自启
+```
+
+打包细节见 [`docs/design.md`](docs/design.md) §7。
 
 ---
 
@@ -176,6 +205,31 @@ paste: uinput ok (shift=False, gap=12ms)
   需 AppIndicator 扩展;否则静默降级,功能不受影响,引导用控制窗口。
 - **复用即继承豆包接口变动风险**:豆包 Web 版接口一旦变更,ASR 会失效;凭证失效会触发自动重登。
 - **剪贴板被覆盖**:每次粘贴覆盖系统剪贴板(与 `doubao-murmur` 一致)。
+
+---
+
+## 📝 变更历史
+
+完整历史见 [`debian/changelog`](debian/changelog)。近期主要变更:
+
+### v1.0.1(2026-06-21)
+
+- **PttOverlay 视觉升级** — 18px 圆角 + 半透明深色面板 + 1.5px 白边 +
+  呼吸 alpha(2.4s 周期,0.78~0.98)+ 敲击触发 220ms 流光闪烁。
+  文字高对比度、纯白粗体,动效不作用于文字。
+- **5 个排版 bug 修复** —
+  - 锁 label 硬宽 360px,修「你好依旧两行」(Pango 0 字符宽时单字一行 bug)
+  - 改 box 为 VERTICAL,修「文字偏右」(之前 HORIZONTAL,label 跟在 wave 右边)
+  - 删 set_ellipsize(START),修「整行变 …」(wrap+ellipsize+CJK Pango bug)
+  - 退回单 widget 树,修「文字看不到」(Gtk.Overlay.add_overlay 位置 bug)
+  - box 撑满 window + CSS `window { background: none }`,修「白方块背景」
+- **launcher 图标修复** — `.desktop` 的 `Icon=` 改用绝对路径,绕过
+  GNOME Shell 的 per-session icon-theme cache,launcher 立即生效
+  无需重登。
+
+### v1.0.0(2026-06-21)
+
+- 初版发布。push-to-hold 全局语音输入法(.deb + systemd user service)。
 
 ---
 
