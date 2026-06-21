@@ -149,12 +149,21 @@ class Overlay:
 
         # Text label (right).
         # Layout goals:
-        #   - Short text (e.g. 2 chars) → 1 line, centered.
+        #   - Short text (e.g. 2 chars) → 1 line, centered, no blank
+        #     second line forced.  The earlier version that used
+        #     `max_width_chars(40) + hexpand(True)` worked once the
+        #     window was mapped, but BEFORE the first size allocation
+        #     (and again every time the label was reset) Pango saw
+        #     "0-char-wide container" and wrapped "你好" to 2 lines
+        #     (one char per line).  Locking the label to a hard pixel
+        #     width via set_size_request fixes that: Pango now sees
+        #     a real width to break against, so 2 chars stay on 1
+        #     line and the label's height is exactly 1 line tall.
         #   - Long text → wrap to ≤ 2 lines, both lines centered.
-        # We deliberately do NOT use set_ellipsize(START): combined with
-        # max_width_chars + wrap + hexpand, GTK 4 / Pango renders the
-        # whole line as a single "…" (treating wrap as "all fits in
-        # one line" and ellipsizing from the start).  Truncation is
+        #
+        # We deliberately do NOT use set_ellipsize(START): combined
+        # with wrap + max_width_chars + CJK word-wrap, GTK 4 / Pango
+        # renders the whole line as a single "…".  Truncation is
         # already handled in _refresh_label via text[-600:].
         label = Gtk.Label()
         label.set_xalign(0.5)            # center within the label box
@@ -162,11 +171,19 @@ class Overlay:
         label.set_justify(Gtk.Justification.CENTER)
         label.set_wrap(True)
         label.set_wrap_mode(0)           # Pango.WrapMode.WORD
-        label.set_max_width_chars(40)
-        # NO set_lines(2): let Pango lay out 1 or 2 lines naturally.
-        # NO set_ellipsize: see comment above; would force "…" in some
-        # widths even when text is short.
-        label.set_hexpand(True)          # let label take full row width
+        # Hard width: ~360 px gives ~14 CJK chars per line.  Hard cap
+        # (not max_) so Pango has a real break-width before the first
+        # size allocation, eliminating the "每字一行" pre-layout bug.
+        label.set_size_request(360, -1)
+        label.set_width_chars(14)
+        # Lock to max 2 lines.  Without this, very long text would
+        # grow the window downward; with it, anything past 2 lines is
+        # simply not drawn (the label height stays at 2 lines tall).
+        label.set_lines(2)
+        # NO set_ellipsize: see comment above; would re-introduce
+        # the "整行 …" Pango bug on CJK text.
+        # Center inside the parent box (label's *natural* size is 360
+        # px wide; parent box is wider, so halign centers it).
         label.set_halign(Gtk.Align.CENTER)
         self._label = label
         box.append(label)
