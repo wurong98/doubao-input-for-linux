@@ -1,0 +1,19 @@
+[Desktop Entry]
+Type=Application
+Name=豆包语音输入法
+Name[en]=Doubao Voice Input
+GenericName=Voice Input Method
+Comment=按住右 Ctrl 说话,松开自动粘贴到当前输入框
+Comment[en]=Hold right-Ctrl, speak, release to paste into the active input
+Exec=doubao-input
+Icon=audio-input-microphone
+Terminal=false
+Categories=Utility;TextTools;AudioVideo;
+StartupNotify=false
+Keywords=voice;speech;input;asr;doubao;
+Actions=show-control;
+
+[Desktop Action show-control]
+Name=显示控制窗口
+Name[en]=Show Control Window
+Exec=doubao-input --show

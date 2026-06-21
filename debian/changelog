@@ -1,0 +1,7 @@
+doubao-input (1.0.0-1) noble; urgency=medium
+
+  * Initial release.
+  * Push-to-hold voice input backed by Doubao ASR.
+  * Vendor logic from doubao-murmur (MIT); see /usr/share/doc/doubao-input/NOTICE.
+
+ -- doubao-input contributors <code-dream@qq.com>  Sat, 21 Jun 2026 18:30:00 +0800

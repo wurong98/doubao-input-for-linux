@@ -1,0 +1,36 @@
+Source: doubao-input
+Section: utils
+Priority: optional
+Maintainer: doubao-input contributors <code-dream@qq.com>
+Build-Depends:
+ debhelper-compat (= 13),
+ dh-python,
+ python3-all,
+ python3-setuptools,
+Standards-Version: 4.6.2
+Homepage: https://github.com/yourname/doubao-input
+Rules-Requires-Root: no
+
+Package: doubao-input
+Architecture: all
+Depends:
+ ${python3:Depends},
+ ${misc:Depends},
+ python3-gi,
+ gir1.2-gtk-4.0,
+ gir1.2-webkit-6.0,
+ libgtk-4-1,
+ libwebkitgtk-6.0-4,
+ python3-websockets,
+ python3-sounddevice,
+ python3-evdev,
+ python3-numpy,
+ wl-clipboard,
+Description: Global push-to-hold voice input for Linux/Wayland
+ Hold right-Ctrl, speak, release: the recognised text is pasted into
+ the currently-focused input field. Backed by Doubao's streaming ASR.
+ .
+ This package installs the Python application, a systemd --user service
+ for auto-start, and a postinst hook that adds the installing user to
+ the 'input' group so it can read /dev/input/event* and write
+ /dev/uinput without sudo.

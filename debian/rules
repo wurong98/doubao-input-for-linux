@@ -1,0 +1,54 @@
+#!/usr/bin/make -f
+
+# Minimal rules: install the source tree + supplementary files into
+# the standard Debian package layout. We avoid dh-python / pybuild to
+# keep the build environment dependency-free (we already verified
+# the source runs under the system Python 3.13 with system-site
+# packages).
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	# No build step; we install pre-built sources.
+
+override_dh_auto_install:
+	# Install Python package into dist-packages
+	python3 -m installer --destdir=debian/doubao-input \
+	    --prefix=/usr --no-compile-bytecode dist/*.whl 2>/dev/null || \
+	install -d debian/doubao-input/usr/lib/python3/dist-packages
+	cp -r src/doubao_input debian/doubao-input/usr/lib/python3/dist-packages/
+	# Strip __pycache__ from the installed tree (don't ship .pyc on
+	# disk; Python will regenerate as needed, and shipping them makes
+	# the .deb larger and version-mismatched).
+	find debian/doubao-input/usr/lib/python3 -type d -name __pycache__ \
+	    -exec rm -rf {} + 2>/dev/null || true
+	find debian/doubao-input/usr/lib/python3 -name '*.pyc' -delete || true
+
+	# Wrapper script
+	install -d debian/doubao-input/usr/bin
+	cat > debian/doubao-input/usr/bin/doubao-input <<'EOF'
+#!/bin/sh
+# Wrapper for the doubao-input voice IME.
+# Reads system-installed package from /usr/lib/python3/dist-packages.
+exec python3 -m doubao_input "$@"
+EOF
+	chmod 0755 debian/doubao-input/usr/bin/doubao-input
+
+	# Systemd user service
+	install -d debian/doubao-input/usr/lib/systemd/user
+	install -m 0644 debian/doubao-input.service \
+	    debian/doubao-input/usr/lib/systemd/user/doubao-input.service
+
+	# Desktop entry
+	install -d debian/doubao-input/usr/share/applications
+	install -m 0644 debian/doubao-input.desktop \
+	    debian/doubao-input/usr/share/applications/doubao-input.desktop
+
+	# Docs
+	install -d debian/doubao-input/usr/share/doc/doubao-input
+	install -m 0644 README.md LICENSE NOTICE docs/design.md \
+	    debian/doubao-input/usr/share/doc/doubao-input/
+
+override_dh_missing:
+	dh_missing --fail-missing

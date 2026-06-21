@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "doubao-input"
+version = "1.0.0"
+description = "Global push-to-hold voice input for Linux/Wayland, backed by Doubao ASR"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "doubao-input contributors" }]
+classifiers = [
+    "Environment :: X11 Applications",
+    "Environment :: Wayland",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: Utilities",
+]
+dependencies = [
+    "websockets>=12",
+    "sounddevice>=0.4.6",
+    "evdev>=1.4",
+]
+
+[project.urls]
+"Source" = "https://github.com/yourname/doubao-input"
+
+[project.scripts]
+doubao-input = "doubao_input.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"doubao_input.login" = ["resources/*.js"]

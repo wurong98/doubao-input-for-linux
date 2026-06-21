@@ -1,0 +1,2 @@
+debian/doubao-input.service /usr/lib/systemd/user/
+debian/doubao-input.desktop /usr/share/applications/

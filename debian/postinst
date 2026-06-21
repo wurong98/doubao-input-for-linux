@@ -1,0 +1,64 @@
+#!/bin/sh
+# postinst for doubao-input
+#
+# - Add the installing user to the 'input' group so they can read
+#   /dev/input/event* (evdev) and write /dev/uinput without sudo.
+# - Reload the user's systemd manager so the doubao-input.service
+#   becomes available even before the next login.
+# - Print a friendly summary so the user knows what to do next.
+
+set -e
+
+USER_NAME="${SUDO_USER:-${USER:-}}"
+GROUP="input"
+
+case "$1" in
+    configure)
+        if [ -z "$USER_NAME" ] || [ "$USER_NAME" = "root" ]; then
+            echo "doubao-input postinst:"
+            echo "  无法自动检测普通用户(root 安装 / 无 SUDO_USER)。"
+            echo "  请手动把当前用户加入 input 组:"
+            echo "    sudo usermod -aG input <your-username>"
+            echo "  然后注销并重新登录。"
+            exit 0
+        fi
+
+        if id -nG "$USER_NAME" | tr ' ' '\n' | grep -qx "$GROUP"; then
+            echo "doubao-input postinst: 用户 $USER_NAME 已在 $GROUP 组。"
+        else
+            echo "doubao-input postinst: 把用户 $USER_NAME 加入 $GROUP 组..."
+            usermod -aG "$GROUP" "$USER_NAME"
+            echo "  ✓ 已加入。请 **注销并重新登录** 让组权限生效。"
+            NEED_RELOGIN=1
+        fi
+
+        # Make the user-service file discoverable without reboot
+        if command -v systemctl >/dev/null 2>&1; then
+            if [ -n "$USER_NAME" ] && [ "$USER_NAME" != "root" ]; then
+                USER_UID=$(id -u "$USER_NAME" 2>/dev/null || true)
+                if [ -n "$USER_UID" ]; then
+                    XDG_RUNTIME_DIR="/run/user/$USER_UID"
+                    if [ -d "$XDG_RUNTIME_DIR" ]; then
+                        USER_ENV="XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
+                        su -s /bin/sh "$USER_NAME" -c "$USER_ENV systemctl --user daemon-reload" 2>/dev/null || true
+                    fi
+                fi
+            fi
+        fi
+
+        echo
+        echo "=== doubao-input 安装完成 ==="
+        echo "  启动方式(任选其一):"
+        echo "    1) 直接运行:doubao-input"
+        echo "    2) 常驻:    systemctl --user enable --now doubao-input.service"
+        echo
+        echo "  首次运行会弹出登录窗口,扫码登录豆包即可。"
+        if [ -n "$NEED_RELOGIN" ]; then
+            echo "  ⚠ 你刚被加入 input 组,**请先注销/重新登录**,否则 evdev/uinput 会无权限。"
+        fi
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0
