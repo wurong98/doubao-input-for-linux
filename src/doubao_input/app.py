@@ -14,7 +14,6 @@ from __future__ import annotations
 import logging
 import os
 import sys
-import time
 
 import gi
 
@@ -128,6 +127,7 @@ class DoubaoInputApp(Gtk.Application):
             on_login_clicked=self._show_login,
             on_quit_clicked=self._quit,
             on_check_mic_clicked=self._check_mic,
+            on_test_inject_clicked=self._test_inject,
             app=self,
         )
 
@@ -174,15 +174,62 @@ class DoubaoInputApp(Gtk.Application):
     # ---- Paste ----
 
     def _do_paste(self, text: str) -> None:
-        # Give the physical right-Ctrl key a moment to fully release
-        # before we synthesize Left Ctrl, to avoid any chance of them
-        # being merged in the receiver.
-        time.sleep(PASTE_DELAY)
+        logger.info("_do_paste called, text=%r (len=%d)", text[:30], len(text))
         if not self._injector:
+            logger.warning("no injector; paste skipped")
             return
-        self._injector.inject(text, use_shift=False)
-        # Clear overlay text shortly after
-        GLib.timeout_add(400, lambda: (self._overlay.set_text(""), False)[1])
+        # CRITICAL: hide BOTH our windows so the injected Ctrl+V goes
+        # to whatever input field the user had focused before pressing
+        # right-Ctrl, not to our own widgets. On Wayland, focus
+        # follows the compositor; the only reliable way to release
+        # focus is to take the window off the screen.
+        if self._overlay is not None and self._overlay._window:
+            try:
+                self._overlay._window.set_visible(False)
+            except Exception:
+                pass
+        # Track whether we had to forcibly hide the control window so
+        # we can restore it after the paste.
+        control_was_visible = False
+        if self._control and self._control._window:
+            try:
+                control_was_visible = self._control._window.get_visible()
+                if control_was_visible:
+                    self._control._window.set_visible(False)
+            except Exception:
+                control_was_visible = False
+
+        def do_inject():
+            logger.info("_do_paste: now injecting %r", text[:30])
+            ok = self._injector.inject(text, use_shift=False)
+            logger.info("_do_paste: injector.inject returned %s", ok)
+            # Restore control window
+            def restore_control():
+                if (
+                    control_was_visible
+                    and self._control
+                    and self._control._window
+                ):
+                    try:
+                        self._control._window.set_visible(True)
+                    except Exception:
+                        pass
+                return GLib.SOURCE_REMOVE
+            GLib.timeout_add(600, restore_control)
+            return GLib.SOURCE_REMOVE
+
+        # Wait for the right-Ctrl physical release + the compositor to
+        # hand focus back to the user's window, THEN inject.
+        GLib.timeout_add(int((PASTE_DELAY + 0.10) * 1000), do_inject)
+
+    def _test_inject(self) -> None:
+        """Diagnostic: inject a fixed string via the same code path the
+        voice pipeline uses. Used by the 「测试粘贴」 button so the user
+        can verify wl-copy + uinput Ctrl+V without logging in first."""
+        logger.info("_test_inject: clicked 测试粘贴 button")
+        # Use the same focus-management code path as _do_paste so we
+        # can be confident the test matches production behaviour.
+        self._do_paste("hello 测试 123\n")
 
     # ---- Login ----
 
