@@ -1,0 +1,30 @@
+# Attribution & License Notice
+
+This project is licensed under the MIT License (see LICENSE).
+
+It vendors and modifies code from the following upstream project:
+
+  - **doubao-murmur** (https://github.com/yourname/doubao-murmur)
+    MIT License, Copyright (c) original authors
+
+All files under `src/doubao_input/doubao/` are derived from the Linux port of
+doubao-murmur (`doubao-murmur/linux/`). Each file carries a docstring
+attribution to the original Swift source file (e.g., "Mirrors
+DoubaoASRClient.swift"). Modifications from the upstream code are:
+
+  1. Internal package imports rewritten from `doubao_murmur.xxx` to
+     `doubao_input.doubao.xxx`.
+  2. Resource path lookups (`_load_js_resource`) rewritten to read from
+     `../login/resources/` instead of `importlib.resources`.
+  3. `audio_capture.py`: added an `on_rms` callback hook (int16 RMS
+     computed in the audio thread) to drive a real-time waveform in the
+     overlay. Upstream only sent raw PCM downstream.
+  4. `transcription.py`: added `handle_press()` / `handle_release()`
+     methods and a 150 ms debounce (`MIN_PRESS_DURATION`) on top of the
+     upstream `handle_toggle()` API, converting the toggle interaction
+     into a push-to-hold (push-to-talk) interaction.
+
+Everything else under `src/doubao_input/` (trigger/, inject/, ui/, app.py,
+__main__.py) is original work for this project.
+
+Tests under `tests/probe/` are original work.

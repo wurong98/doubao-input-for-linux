@@ -1,0 +1,67 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Pytest / test cache
+.pytest_cache/
+.tox/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.cache
+
+# IDE / editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs / runtime artifacts
+*.log
+*.pid
+
+# Local secrets / session data
+asr_params.json
+*.swp
+
+# Build artifacts (deb, dist)
+*.deb
+*.tar.gz
+*.tar.bz2
+*.zip
+build-dir/
+.flatpak-builder/
+
+# Test/debug artifacts
+/tmp/
+/.cache/
