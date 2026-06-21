@@ -185,7 +185,7 @@ class ControlWindow:
 
         # Header: logo + title side by side
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        header.set_xalign(0.0)
+        header.set_halign(Gtk.Align.START)
         try:
             logo_img = Gtk.Image.new_from_file(
                 "/usr/share/icons/hicolor/128x128/apps/doubao-input.png"
