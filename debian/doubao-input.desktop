@@ -6,7 +6,10 @@ GenericName=Voice Input Method
 Comment=按住右 Ctrl 说话,松开自动粘贴到当前输入框
 Comment[en]=Hold right-Ctrl, speak, release to paste into the active input
 Exec=doubao-input
-Icon=doubao-input
+# Use absolute path (not theme name) so the launcher doesn't depend
+# on the icon-theme cache lookup, which GNOME Shell caches per-session
+# and won't refresh until logout/login.
+Icon=/usr/share/icons/hicolor/128x128/apps/doubao-input.png
 Terminal=false
 Categories=Utility;TextTools;AudioVideo;
 StartupNotify=false
