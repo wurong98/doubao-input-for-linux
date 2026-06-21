@@ -31,12 +31,14 @@ class ControlWindow:
         on_login_clicked: Callable[[], None],
         on_quit_clicked: Callable[[], None],
         on_check_mic_clicked: Callable[[], None],
+        on_test_inject_clicked: Optional[Callable[[], None]] = None,
         app: Optional[Gtk.Application] = None,
     ) -> None:
         self._app_state = app_state
         self._on_login = on_login_clicked
         self._on_quit = on_quit_clicked
         self._on_check_mic = on_check_mic_clicked
+        self._on_test_inject = on_test_inject_clicked
         self._app = app
         self._window: Optional[Gtk.Window] = None
         self._status_label: Optional[Gtk.Label] = None
@@ -204,7 +206,10 @@ class ControlWindow:
         # voice pipeline uses. Lets the user verify wl-copy + uinput Ctrl+V
         # end-to-end without having to log in first.
         test_btn = Gtk.Button.new_with_label("测试粘贴 (注入 'hello 测试 123')")
-        test_btn.connect("clicked", lambda *_: self._on_test_inject())
+        if self._on_test_inject is not None:
+            test_btn.connect("clicked", lambda *_: self._on_test_inject())
+        else:
+            test_btn.set_sensitive(False)
         box.append(test_btn)
 
         help = Gtk.Label()

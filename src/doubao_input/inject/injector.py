@@ -112,24 +112,32 @@ class Injector:
         try:
             ui = self._get_uinput()
             import evdev  # type: ignore
+            import time as _t
             KEY_LEFTSHIFT = 42
+            # Some receivers (notably GTK apps and terminals) need
+            # measurable time between key events; otherwise the
+            # press-release sequence gets coalesced into nothing and
+            # the paste shortcut never registers.
+            GAP = 0.012  # seconds between events
+
+            def emit(code: int, value: int) -> None:
+                ui.write(evdev.ecodes.EV_KEY, code, value)
+                ui.syn()
+                _t.sleep(GAP)
+
             # Press
-            ui.write(evdev.ecodes.EV_KEY, KEY_LEFTCTRL, 1)
-            ui.syn()
+            emit(KEY_LEFTCTRL, 1)
             if use_shift:
-                ui.write(evdev.ecodes.EV_KEY, KEY_LEFTSHIFT, 1)
-                ui.syn()
-            ui.write(evdev.ecodes.EV_KEY, KEY_V, 1)
-            ui.syn()
+                emit(KEY_LEFTSHIFT, 1)
+            emit(KEY_V, 1)
+            _t.sleep(GAP)
             # Release
-            ui.write(evdev.ecodes.EV_KEY, KEY_V, 0)
-            ui.syn()
+            emit(KEY_V, 0)
             if use_shift:
-                ui.write(evdev.ecodes.EV_KEY, KEY_LEFTSHIFT, 0)
-                ui.syn()
-            ui.write(evdev.ecodes.EV_KEY, KEY_LEFTCTRL, 0)
-            ui.syn()
-            logger.info("paste: uinput ok (shift=%s)", use_shift)
+                emit(KEY_LEFTSHIFT, 0)
+            emit(KEY_LEFTCTRL, 0)
+            logger.info("paste: uinput ok (shift=%s, gap=%.0fms)",
+                        use_shift, GAP * 1000)
             return True
         except Exception as e:
             logger.error("uinput paste failed: %s", e)
