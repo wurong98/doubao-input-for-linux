@@ -52,6 +52,17 @@ override_dh_auto_install:
 	install -m 0644 debian/doubao-input.desktop \
 	    debian/doubao-input/usr/share/applications/doubao-input.desktop
 
+	# App icon — hicolor theme (size 128 covers most uses including
+	# GNOME shell, app grid, and our own Gtk.Image buttons).
+	install -d debian/doubao-input/usr/share/icons/hicolor/128x128/apps
+	install -m 0644 src/doubao_input/resources/logo-128.png \
+	    debian/doubao-input/usr/share/icons/hicolor/128x128/apps/doubao-input.png
+	install -d debian/doubao-input/usr/share/icons/hicolor/scalable/apps
+	# Use the full-resolution PNG as the "scalable" placeholder; if a
+	# proper SVG is ever produced it should replace this file.
+	install -m 0644 src/doubao_input/resources/logo.png \
+	    debian/doubao-input/usr/share/icons/hicolor/scalable/apps/doubao-input.png
+
 	# Docs
 	install -d debian/doubao-input/usr/share/doc/doubao-input
 	install -m 0644 README.md LICENSE NOTICE docs/design.md \

@@ -183,10 +183,32 @@ class ControlWindow:
         box.set_margin_top(20)
         box.set_margin_bottom(20)
 
+        # Header: logo + title side by side
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        header.set_xalign(0.0)
+        try:
+            logo_img = Gtk.Image.new_from_file(
+                "/usr/share/icons/hicolor/128x128/apps/doubao-input.png"
+            )
+        except Exception:
+            try:
+                # dev / non-installed fallback: bundled resources path
+                from pathlib import Path
+                here = Path(__file__).resolve().parent
+                bundled = here.parent / "resources" / "logo-128.png"
+                logo_img = Gtk.Image.new_from_file(str(bundled))
+            except Exception:
+                logo_img = None
+        if logo_img is not None:
+            logo_img.set_pixel_size(64)
+            header.append(logo_img)
+
         title = Gtk.Label()
         title.set_xalign(0.0)
+        title.set_valign(Gtk.Align.CENTER)
         title.set_markup("<b><big>豆包语音输入法</big></b>")
-        box.append(title)
+        header.append(title)
+        box.append(header)
 
         self._status_label = Gtk.Label()
         self._status_label.set_xalign(0.0)
