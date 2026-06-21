@@ -163,32 +163,48 @@ class Overlay:
         # has a CSS background = dark translucent + 1.5px white border
         # + 18px border-radius.  This avoids the Gtk.Overlay positioning
         # bug that hid the label in commit de11f91.
+        #
+        # Box margins are ZERO — the box fills the entire window so
+        # the round-corner CSS background covers the whole window
+        # (no white window-default background leaking out).
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        box.set_margin_start(18)
-        box.set_margin_end(18)
-        box.set_margin_top(12)
-        box.set_margin_bottom(12)
-        box.set_halign(Gtk.Align.CENTER)
-        box.set_valign(Gtk.Align.CENTER)
-        # CSS provider: round corners + dark translucent background.
-        # We bind this provider to the box via its style context.
+        box.set_halign(Gtk.Align.FILL)
+        box.set_valign(Gtk.Align.FILL)
+        box.set_hexpand(True)
+        box.set_vexpand(True)
+        # CSS provider:
+        #   - window { background: none } makes the window itself
+        #     transparent so the box's CSS background is what shows.
+        #   - box { border-radius + background + border } gives the
+        #     rounded translucent panel.
+        # Without the window-level rule, GTK fills the area between
+        # the box and the window edge with default white, which is
+        # the "white square" the user is seeing.
         provider = Gtk.CssProvider()
         css = (
+            "window { background: none; background-color: transparent; }"
             "box {"
             f"  border-radius: {CORNER_PX}px;"
             "  background-color: rgba(18, 20, 26, 0.78);"
             f"  border: 1.5px solid rgba(255, 255, 255, 0.30);"
-            "  padding: 0;"
+            "  padding: 18px 18px 12px 18px;"
             "}"
         )
         try:
             provider.load_from_data(css.encode("utf-8"))
         except Exception:
             try:
-                # older signature
                 provider.load_from_data(css)
             except Exception:
                 pass
+        # Apply to BOTH the window (so the area outside the box is
+        # transparent) and the box (for rounded background + border).
+        try:
+            win.get_style_context().add_provider(
+                provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+            )
+        except Exception:
+            pass
         try:
             box.get_style_context().add_provider(
                 provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
