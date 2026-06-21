@@ -27,6 +27,7 @@ class AudioCapture:
     def __init__(self) -> None:
         self._stream: Any | None = None
         self._on_audio_data = None  # callback: (bytes) -> None
+        self._on_rms = None        # callback: (float in [0,1]) -> None
         self._lock = threading.Lock()
 
     @property
@@ -64,15 +65,37 @@ class AudioCapture:
             self._stream.close()
             self._stream = None
             self._on_audio_data = None
+            self._on_rms = None
             logger.info("Audio capture stopped")
 
     def _audio_callback(self, indata, frames, time_info, status) -> None:
         """Called by PortAudio on audio thread."""
         if status:
             logger.warning("Audio callback status: %s", status)
+        # indata is already int16 LE bytes from RawInputStream
+        data = bytes(indata)
         if self._on_audio_data:
-            # indata is already int16 LE bytes from RawInputStream
-            self._on_audio_data(bytes(indata))
+            self._on_audio_data(data)
+        if self._on_rms:
+            # RMS in [0,1], normalized by 32768.
+            # Compute on int16 view (cheap, ~256ms chunks at 16kHz).
+            try:
+                import array
+                a = array.array("h")
+                a.frombytes(data)
+                if a:
+                    s = 0
+                    for v in a:
+                        s += v * v
+                    rms = (s / len(a)) ** 0.5 / 32768.0
+                else:
+                    rms = 0.0
+            except Exception:
+                rms = 0.0
+            try:
+                self._on_rms(min(1.0, rms))
+            except Exception:
+                pass
 
     @staticmethod
     def list_input_devices():

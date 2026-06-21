@@ -20,6 +20,9 @@ from doubao_input.doubao.audio_capture import AudioCapture
 from doubao_input.doubao.config import AUTH_EXPIRY_DELAY, STOP_SAFETY_TIMEOUT
 from doubao_input.doubao.params_store import ASRParams, ParamsStore
 
+# Minimum press duration to be treated as a real PTT (vs accidental tap).
+MIN_PRESS_DURATION = 0.15  # seconds
+
 logger = logging.getLogger(__name__)
 
 
@@ -34,6 +37,7 @@ class TranscriptionManager:
         self.using_cached_params = False
         self.awaiting_final_result = False
         self.safety_timer_id: int | None = None
+        self._press_started_at: float = 0.0
 
         # Callbacks set by app.py
         self.on_auth_expired = None  # () -> None
@@ -64,13 +68,37 @@ class TranscriptionManager:
     # --- Toggle ---
 
     def handle_toggle(self) -> None:
-        """Called on GTK main thread from hotkey manager."""
+        """Called on GTK main thread from hotkey manager.
+        Kept for compatibility with the original toggle-style API."""
         state = self.app_state.recording_state
         if state == RecordingState.IDLE:
             self._start_recording()
         elif state in (RecordingState.STARTING, RecordingState.RECORDING):
             self._stop_recording()
         # STOPPING: ignore
+
+    # --- Push-to-hold (primary API for this project) ---
+
+    def handle_press(self) -> None:
+        """Right-Ctrl down: start recording (if not already recording)."""
+        import time as _t
+        self._press_started_at = _t.monotonic()
+        if self.app_state.recording_state == RecordingState.IDLE:
+            self._start_recording()
+
+    def handle_release(self) -> None:
+        """Right-Ctrl up: stop recording and inject (unless a too-brief tap)."""
+        import time as _t
+        dur = _t.monotonic() - self._press_started_at if self._press_started_at else 0
+        self._press_started_at = 0.0
+        state = self.app_state.recording_state
+        if state not in (RecordingState.STARTING, RecordingState.RECORDING):
+            return
+        if dur < MIN_PRESS_DURATION:
+            logger.info("Press too short (%.3fs), treating as accidental tap", dur)
+            self.handle_cancel()
+            return
+        self._stop_recording()
 
     def _start_recording(self) -> None:
         if self.app_state.login_status != LoginStatus.LOGGED_IN:
