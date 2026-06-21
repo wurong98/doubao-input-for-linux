@@ -1,3 +1,16 @@
+doubao-input (1.0.2-1) noble; urgency=medium
+
+  * Logo: replaced white-backed assets with transparent-background
+    versions.  Previous logo.png / logo-128.png were RGBA but
+    every corner pixel had alpha=255 (opaque white), which made
+    the launcher icon look like a square badge and the README
+    image show a white frame around the avatar.  The new avatar
+    (697×736 RGBA, corners alpha=0) is genuinely transparent so
+    the hicolor launcher badge blends with the desktop background
+    and the README image sits flush on the page.
+
+ -- doubao-input contributors <code-dream@qq.com>  Sun, 21 Jun 2026 21:50:00 +0800
+
 doubao-input (1.0.1-1) noble; urgency=medium
 
   * UI: PttOverlay rounded panel + breathing alpha + glint flash.

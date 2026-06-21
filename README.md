@@ -212,6 +212,13 @@ systemctl --user enable --now doubao-input.service  # 开机自启
 
 完整历史见 [`debian/changelog`](debian/changelog)。近期主要变更:
 
+### v1.0.2(2026-06-21)
+
+- **Logo 透明背景** — 把白底的 logo.png / logo-128.png 替换为
+  RGBA 真透明版本(角点 alpha=0)。launcher 图标不再有
+  白色方框,README 头像不再有白色描边。版本号 bump 因为
+  这是用户视觉层的修复,虽然不是功能改动。
+
 ### v1.0.1(2026-06-21)
 
 - **PttOverlay 视觉升级** — 18px 圆角 + 半透明深色面板 + 1.5px 白边 +
