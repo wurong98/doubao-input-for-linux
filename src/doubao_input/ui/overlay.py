@@ -24,7 +24,10 @@ from gi.repository import GLib, Gdk, Gtk  # type: ignore
 logger = logging.getLogger(__name__)
 
 OVERLAY_WIDTH = 560
-OVERLAY_HEIGHT = 76  # taller: 1 short line uses ~40px, 2 lines fit comfortably
+# Vertical stack: wave (40) + spacing (6) + 2-line label (43) +
+# vertical margins (8 + 8) = 105 px.  Round up to 110 for breathing
+# room and to keep the 波形胶囊 looking balanced.
+OVERLAY_HEIGHT = 110
 WAVE_BARS = 24           # number of bars in the scrolling waveform
 WAVE_BAR_W = 4           # width per bar
 WAVE_BAR_GAP = 3         # gap between bars
@@ -128,26 +131,35 @@ class Overlay:
         except Exception:
             pass
 
-        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        # Stack wave on top, label below — vertical layout.  The
+        # earlier horizontal layout put the label immediately to the
+        # right of the waveform, so the text always looked "shifted
+        # right" even with internal centering.  Vertical stack + a
+        # centered label produces a clean, symmetric 波形胶囊.
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         box.set_margin_start(14)
         box.set_margin_end(14)
         box.set_margin_top(8)
         box.set_margin_bottom(8)
+        # Center the box's children horizontally (otherwise the wave
+        # + label stack would be flush-left inside the window).
+        box.set_halign(Gtk.Align.CENTER)
 
-        # Waveform area (left): use Gtk.Picture with a Gdk.Texture built
+        # Waveform area (top): use Gtk.Picture with a Gdk.Texture built
         # from a cairo ImageSurface. We render to ImageSurface in Python
         # (no PyGObject cairo.Context pass-through needed) and only
         # touch Gdk.Texture/Gtk.Picture from Python.
         wave = Gtk.Picture()
         wave.set_size_request(WAVE_BARS * (WAVE_BAR_W + WAVE_BAR_GAP) + 4, 40)
         wave.set_can_shrink(False)
+        wave.set_halign(Gtk.Align.CENTER)
         self._wave = wave
         self._wave_tex: Optional[Gdk.Texture] = None
         # Initial blank frame
         self._upload_wave_texture()
         box.append(wave)
 
-        # Text label (right).
+        # Text label (bottom).
         # Layout goals:
         #   - Short text (e.g. 2 chars) → 1 line, centered, no blank
         #     second line forced.  The earlier version that used
@@ -166,7 +178,7 @@ class Overlay:
         # renders the whole line as a single "…".  Truncation is
         # already handled in _refresh_label via text[-600:].
         label = Gtk.Label()
-        label.set_xalign(0.5)            # center within the label box
+        label.set_xalign(0.5)            # center text within the label
         label.set_yalign(0.5)
         label.set_justify(Gtk.Justification.CENTER)
         label.set_wrap(True)
@@ -182,8 +194,7 @@ class Overlay:
         label.set_lines(2)
         # NO set_ellipsize: see comment above; would re-introduce
         # the "整行 …" Pango bug on CJK text.
-        # Center inside the parent box (label's *natural* size is 360
-        # px wide; parent box is wider, so halign centers it).
+        # Center the label inside the parent box.
         label.set_halign(Gtk.Align.CENTER)
         self._label = label
         box.append(label)
