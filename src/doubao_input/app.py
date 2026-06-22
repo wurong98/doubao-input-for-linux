@@ -176,7 +176,49 @@ class DoubaoInputApp(Gtk.Application):
                 self._tray.set_recording(value in ("recording", "starting"))
             self.app_state.connect("recording-state-changed", _on_rec_changed)
 
+        # ---- 后台预热 PortAudio / PulseAudio ----
+        # 首次 RawInputStream(...).start() 会触发 PulseAudio 服务发现 + ALSA
+        # 句柄申请 + cffi 闭包构造, 在我们机器上要 ~280ms. 这意味着用户按下
+        # 右 Ctrl 后 overlay 显示 "正在启动语音识别..." 会停留近半秒才真的
+        # 开始听. 在 build complete 之后立刻 open+close 一次同样参数的流,
+        # 让 PortAudio 把这些状态预热在进程内, 正式录音时延迟降到 ~30-60ms.
+        import threading as _th
+        _th.Thread(
+            target=self._prewarm_audio,
+            name="prewarm-audio",
+            daemon=True,
+        ).start()
+
         logger.info("build complete")
+
+    def _prewarm_audio(self) -> None:
+        """后台线程: open+close 一个 dummy RawInputStream 预热 PortAudio.
+
+        所有调用都在后台线程, 不阻塞主循环. 失败静默 — 主流程不依赖它,
+        预热不成功只是第一次录音慢一点.
+        """
+        try:
+            import sounddevice as sd
+            from doubao_input.doubao.config import (
+                AUDIO_BLOCKSIZE, AUDIO_CHANNELS, AUDIO_SAMPLE_RATE,
+            )
+            t0 = __import__("time").monotonic()
+            stream = sd.RawInputStream(
+                samplerate=AUDIO_SAMPLE_RATE,
+                channels=AUDIO_CHANNELS,
+                dtype="int16",
+                blocksize=AUDIO_BLOCKSIZE,
+                callback=lambda *_a: None,
+                latency="low",
+            )
+            stream.start()
+            stream.stop()
+            stream.close()
+            logger.info(
+                "audio prewarm done in %.0f ms", (__import__("time").monotonic() - t0) * 1000,
+            )
+        except Exception as e:
+            logger.debug("audio prewarm failed (non-fatal): %s", e)
 
     # ---- PTT callbacks (run on GTK main thread) ----
 
