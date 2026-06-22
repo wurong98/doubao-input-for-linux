@@ -8,6 +8,10 @@
 
 详细设计见 [`docs/design.md`](docs/design.md)。
 
+> 📎 **跑在老系统(Ubuntu 20.04 / GTK3 / X11)上?** 见 [`docs/x11-gtk3-port.md`](docs/x11-gtk3-port.md) —
+> 在 `feat/x11-gtk3-port` 分支提供 GTK3 + WebKit2 4.0 + xdotool 的临时方案,
+> 不会合回 master,仅作 fork 留档。
+
 ---
 
 ## 📸 截图
