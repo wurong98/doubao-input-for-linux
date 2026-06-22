@@ -88,7 +88,20 @@ class EvdevPtt:
         fds: list[int] = []
         paths: list[str] = []
         # evdev.list_devices() returns paths the process can actually open.
-        for path in evdev.list_devices():
+        all_paths = evdev.list_devices()
+        logger.info(
+            "evdev scan: %d total device(s) under /dev/input/event*",
+            len(all_paths),
+        )
+        if not all_paths:
+            logger.warning(
+                "evdev sees ZERO devices. Likely cause: this process is not "
+                "in the 'input' group. Check `id` / `groups` of the launching "
+                "shell, or wrap start.sh with `sg input -c ...` until you "
+                "re-login."
+            )
+        skipped_no_rctrl = 0
+        for path in all_paths:
             try:
                 dev = evdev.InputDevice(path)
                 caps = dev.capabilities()
@@ -96,12 +109,20 @@ class EvdevPtt:
                     fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
                     fds.append(fd)
                     paths.append(path)
+                else:
+                    skipped_no_rctrl += 1
             except (PermissionError, FileNotFoundError, OSError) as e:
                 logger.debug("Skip %s: %s", path, e)
                 continue
             except Exception as e:
                 logger.debug("Skip %s: %s", path, e)
                 continue
+        if all_paths and not fds:
+            logger.warning(
+                "evdev: %d device(s) visible but none expose KEY_RIGHTCTRL "
+                "(skipped=%d). Right-Ctrl trigger will not fire.",
+                len(all_paths), skipped_no_rctrl,
+            )
         self._fds = fds
         self._paths = paths
         return bool(fds)

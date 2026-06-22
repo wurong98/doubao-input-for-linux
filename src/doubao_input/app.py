@@ -56,6 +56,9 @@ class DoubaoInputApp(Gtk.Application):
         self._injector: Injector | None = None
         self._tray: Tray | None = None
         self._last_press_at: float = 0.0
+        # PTT 按下瞬间抓到的目标窗口 ID (X11). 之后 _do_paste 凭这个 ID
+        # 判断终端/编辑器/普通应用, 选 xdotool type 还是 Ctrl+V.
+        self._target_window: int | None = None
 
     # ---- Gtk.Application hooks (signal handlers, not do_*) ----
 
@@ -184,6 +187,10 @@ class DoubaoInputApp(Gtk.Application):
             self._overlay.set_text("请先在控制窗口完成登录")
             self._overlay.show("未登录")
             return
+        # 在按下瞬间记录目标窗口 ID, 留到 _do_paste 时用. 之后我们的 overlay
+        # 弹出来可能让焦点流转, 这是最稳的时机. 参考 zhipu-asr 的做法.
+        self._target_window = self._capture_active_window()
+        logger.info("PTT press: target_window=%s", self._target_window)
         self._tm.handle_press()
 
     def _on_ptt_release(self) -> None:
@@ -196,6 +203,28 @@ class DoubaoInputApp(Gtk.Application):
 
     def _on_ptt_error(self, msg: str) -> None:
         logger.warning("PTT error: %s", msg)
+
+    @staticmethod
+    def _capture_active_window() -> "int | None":
+        """X11: 调 xdotool getactivewindow 拿当前焦点窗口 ID.
+
+        失败返回 None — 此时 injector 退化到无差别剪贴板+Ctrl+V 路径.
+        """
+        import shutil, subprocess
+        if not shutil.which("xdotool"):
+            return None
+        try:
+            r = subprocess.run(
+                ["xdotool", "getactivewindow"],
+                capture_output=True, text=True, timeout=1.0,
+            )
+            if r.returncode == 0:
+                s = r.stdout.strip()
+                if s.isdigit():
+                    return int(s)
+        except Exception as e:
+            logger.debug("getactivewindow failed: %s", e)
+        return None
 
     # ---- Paste ----
 
@@ -227,7 +256,14 @@ class DoubaoInputApp(Gtk.Application):
 
         def do_inject():
             logger.info("_do_paste: now injecting %r", text[:30])
-            ok = self._injector.inject(text, use_shift=False)
+            # 传入按下 PTT 时抓到的目标窗口 ID, injector 凭它选粘贴策略:
+            # 普通窗口 -> 剪贴板 + uinput Ctrl+V
+            # 终端/VSCode -> xdotool type 逐字符 (避开 Ctrl+V 被 TUI 拦截)
+            ok = self._injector.inject(
+                text,
+                use_shift=False,
+                target_window=self._target_window,
+            )
             logger.info("_do_paste: injector.inject returned %s", ok)
             # Restore control window
             def restore_control():
