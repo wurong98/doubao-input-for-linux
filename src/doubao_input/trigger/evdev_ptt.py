@@ -85,6 +85,14 @@ class EvdevPtt:
     def is_running(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
 
+    def suppress(self) -> None:
+        """Pause PTT event dispatch (call before xdotool/uinput injection)."""
+        self._suppressed.set()
+
+    def resume(self) -> None:
+        """Resume PTT event dispatch."""
+        self._suppressed.clear()
+
     # ---- internals ----
 
     def _scan(self) -> bool:
@@ -181,6 +189,10 @@ class EvdevPtt:
             self._notify_error(f"evdev 监听崩溃: {e}")
 
     def _dispatch(self, data: bytes, idle_add) -> None:
+        # 注入期屏蔽: 整个数据帧丢弃, 避免 xdotool/uinput 合成事件回流
+        # 被当成用户按键 (详见 __init__ 注释).
+        if self._suppressed.is_set():
+            return
         i = 0
         n = len(data)
         # Cache right-ctrl down state per "logical session" (across all fds).

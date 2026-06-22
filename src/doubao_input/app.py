@@ -327,6 +327,12 @@ class DoubaoInputApp(Gtk.Application):
 
         def do_inject():
             logger.info("_do_paste: now injecting %r", text[:30])
+            # 屏蔽 evdev_ptt: xdotool type 和 uinput Ctrl+V 会通过 X 协议
+            # / 内核虚拟键盘合成键事件, 这些事件可能从 /dev/input/event*
+            # 流回我们自己的 PTT 监听线程, 被误认为用户又按了一次右 Ctrl.
+            # 表现就是 "注入完立刻又开始一次空录音 → 老重启".
+            if self._ptt is not None:
+                self._ptt.suppress()
             # 传入按下 PTT 时抓到的目标窗口 ID, injector 凭它选粘贴策略:
             # 普通窗口 -> 剪贴板 + uinput Ctrl+V
             # 终端/VSCode -> xdotool type 逐字符 (避开 Ctrl+V 被 TUI 拦截)
@@ -336,6 +342,7 @@ class DoubaoInputApp(Gtk.Application):
                 target_window=self._target_window,
             )
             logger.info("_do_paste: injector.inject returned %s", ok)
+
             # Restore control window
             def restore_control():
                 if (
@@ -349,6 +356,15 @@ class DoubaoInputApp(Gtk.Application):
                         pass
                 return GLib.SOURCE_REMOVE
             GLib.timeout_add(600, restore_control)
+
+            # 注入后再屏蔽一会儿, 因为 X 协议合成事件经由 evdev fd 到达
+            # 有不可忽略的延迟, 立刻 resume 仍可能误触. 300ms 比 GTK 默认
+            # autorepeat 间隔(33ms)长得多, 不影响真实右 Ctrl 触发.
+            def _resume_ptt():
+                if self._ptt is not None:
+                    self._ptt.resume()
+                return GLib.SOURCE_REMOVE
+            GLib.timeout_add(300, _resume_ptt)
             return GLib.SOURCE_REMOVE
 
         # 注入前等一会儿:
