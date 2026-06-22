@@ -37,10 +37,10 @@ from doubao_input.doubao.host_tools import command_candidates
 
 logger = logging.getLogger(__name__)
 
-# Pause after wl-copy so the clipboard manager has settled.
-# Also pause after the right-Ctrl physical release to avoid mixing it
-# with our injected Left Ctrl.
-PASTE_DELAY = 0.08  # seconds
+# 剪贴板写入到读取的最小可靠间隔: clipboard manager (klipper, gpaste, gnome-shell
+# 内置) 通常在写入后 20-30ms 内能稳定提供. 原值 80ms 是 Wayland 早期保守值, X11
+# 下 xclip 已经写完才返回, 可以更短.
+PASTE_DELAY = 0.02  # seconds
 
 # Linux keycodes (from linux/input-event-codes.h)
 KEY_LEFTCTRL = 29
@@ -243,16 +243,22 @@ class Injector:
         # 让 clipboard manager 有时间生效.
         time.sleep(PASTE_DELAY)
         # 把焦点切回目标窗口, 否则 uinput 注的 Ctrl+V 可能落在错的地方.
+        # 用 stderr 重定向吞掉 `X Error of failed request: BadMatch
+        # X_SetInputFocus` — 这条错是当目标窗口未 viewable / iconified 时
+        # XSetInputFocus 抛的, xdotool 不退出但日志很吵, 也无碍后续粘贴
+        # (失败时再退化到不切焦点直接发 Ctrl+V).
         if target_window is not None and self._has_xdotool:
             try:
                 subprocess.run(
-                    ["xdotool", "windowfocus", str(target_window)],
+                    ["xdotool", "windowfocus", "--sync", str(target_window)],
                     check=False, timeout=1.5,
+                    stderr=subprocess.DEVNULL,
                 )
-                time.sleep(0.05)
+                time.sleep(0.03)
                 subprocess.run(
                     ["xdotool", "keyup", "ctrl", "shift", "alt"],
                     check=False, timeout=1.5,
+                    stderr=subprocess.DEVNULL,
                 )
             except Exception as e:
                 logger.debug("windowfocus failed (non-fatal): %s", e)

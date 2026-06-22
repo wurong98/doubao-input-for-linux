@@ -351,9 +351,16 @@ class DoubaoInputApp(Gtk.Application):
             GLib.timeout_add(600, restore_control)
             return GLib.SOURCE_REMOVE
 
-        # Wait for the right-Ctrl physical release + the compositor to
-        # hand focus back to the user's window, THEN inject.
-        GLib.timeout_add(int((PASTE_DELAY + 0.10) * 1000), do_inject)
+        # 注入前等一会儿:
+        #   1. 右 Ctrl 物理键弹起去抖 — 我们刚被它的 release 触发, 但物理
+        #      按键的弹起在 evdev 上可能持续 30-60ms 才稳定. 太短的延迟
+        #      会让用户连点 / 长按抖动时 evdev 误判出多次 press, 之后到这
+        #      里的 _do_paste 又再次抓 active window, 体感上变成 "录了空文,
+        #      再录, 再录, 反复重启录音".
+        #   2. 让剪贴板 manager / 焦点切换稳定一会儿.
+        # 80ms 在 X11 + xdotool 显式 windowfocus 的现在足够 (原值是
+        # PASTE_DELAY + 0.10 = 180ms, 偏保守).
+        GLib.timeout_add(80, do_inject)
 
     def _test_inject(self) -> None:
         """Diagnostic: inject a fixed string via the same code path the

@@ -59,14 +59,35 @@ class AudioCapture:
         )
 
     def stop(self) -> None:
-        """Stop capturing."""
-        if self._stream:
-            self._stream.stop()
-            self._stream.close()
-            self._stream = None
-            self._on_audio_data = None
-            self._on_rms = None
-            logger.info("Audio capture stopped")
+        """Stop capturing.
+
+        把 stream.close() 放后台线程: sounddevice 的 close() 会同步销毁
+        ALSA 句柄 + cffi 闭包, 在 PulseAudio 后端实测要 ~400ms. 主流程
+        阻塞这么久会让用户感知"松开 → 文字出现"卡顿. close 不影响后续
+        操作 —— 只要 stop() 已经返回, 我们就不再处理音频回调.
+        """
+        if self._stream is None:
+            return
+        s = self._stream
+        self._stream = None
+        self._on_audio_data = None
+        self._on_rms = None
+        # stop() 是必须同步做的: 让 PortAudio 停止往回调里塞数据.
+        try:
+            s.stop()
+        except Exception as e:
+            logger.warning("stream.stop failed: %s", e)
+        # close() 后台做.
+        import threading as _th
+
+        def _bg_close():
+            try:
+                s.close()
+            except Exception as e:
+                logger.debug("stream.close failed (bg): %s", e)
+
+        _th.Thread(target=_bg_close, name="audio-close", daemon=True).start()
+        logger.info("Audio capture stopped (close deferred)")
 
     def _audio_callback(self, indata, frames, time_info, status) -> None:
         """Called by PortAudio on audio thread."""
