@@ -296,7 +296,32 @@ class Injector:
         return self._ui
 
     def _simulate_paste(self, use_shift: bool = False) -> bool:
-        """Send a Ctrl+V (or Ctrl+Shift+V) keypress through uinput."""
+        """Synthesize Ctrl+V (or Ctrl+Shift+V) on the focused window.
+
+        Channel order matters:
+          1) **xdotool key (XTest)** — preferred. Sends XTestFakeKeyEvent
+             directly to the X server's focused window, bypassing any
+             input-method GrabKey traps. We need this because on
+             ibus/sogou-pinyin sessions the uinput channel below gets
+             its 'V' keypress swallowed by the IME's pinyin starter,
+             and Ctrl+V never reaches the target app.
+          2) **/dev/uinput** — fallback for pure-Wayland sessions
+             without an X server (where xdotool is useless), and for
+             running under wlroots-style compositors that need a real
+             virtual keyboard device.
+        """
+        keysym = "ctrl+shift+v" if use_shift else "ctrl+v"
+        if self._has_xdotool:
+            try:
+                subprocess.run(
+                    ["xdotool", "key", "--clearmodifiers", keysym],
+                    check=True, timeout=2, capture_output=True,
+                )
+                logger.info("paste: xdotool XTest ok (keysym=%s)", keysym)
+                return True
+            except Exception as e:
+                logger.debug("xdotool key failed, falling back to uinput: %s", e)
+
         try:
             ui = self._get_uinput()
             import evdev  # type: ignore
