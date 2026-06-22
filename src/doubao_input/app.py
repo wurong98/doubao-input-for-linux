@@ -176,6 +176,18 @@ class DoubaoInputApp(Gtk.Application):
                 self._tray.set_recording(value in ("recording", "starting"))
             self.app_state.connect("recording-state-changed", _on_rec_changed)
 
+        # 录音回到 IDLE 时调度一次后台预热, 让 PulseAudio 句柄保持热
+        # 直到 ~60s 空闲超时. 取消/cancel/safety-timeout 等所有路径
+        # 都会经过 IDLE, 这里集中处理.
+        def _on_state_idle(_state, value: str) -> None:
+            if value == "idle":
+                # 延迟 1s 起预热, 避免和音频 stop / 粘贴尾流抢资源
+                GLib.timeout_add(
+                    1000,
+                    lambda: (self._schedule_prewarm(), GLib.SOURCE_REMOVE)[1],
+                )
+        self.app_state.connect("recording-state-changed", _on_state_idle)
+
         # ---- 后台预热 PortAudio / PulseAudio ----
         # 首次 RawInputStream(...).start() 会触发 PulseAudio 服务发现 + ALSA
         # 句柄申请 + cffi 闭包构造, 在我们机器上要 ~280ms. 这意味着用户按下
@@ -196,6 +208,10 @@ class DoubaoInputApp(Gtk.Application):
 
         所有调用都在后台线程, 不阻塞主循环. 失败静默 — 主流程不依赖它,
         预热不成功只是第一次录音慢一点.
+
+        每次 _reset_to_idle 之后会再次调度一次预热, 这样 PulseAudio 的
+        ALSA 句柄在 ~60s 空闲释放之前一直是热的, 用户下一次按下 PTT 都能
+        命中冷启动后的常量低延迟 (~5ms vs ~270ms 冷态).
         """
         try:
             import sounddevice as sd
@@ -219,6 +235,19 @@ class DoubaoInputApp(Gtk.Application):
             )
         except Exception as e:
             logger.debug("audio prewarm failed (non-fatal): %s", e)
+
+    def _schedule_prewarm(self) -> None:
+        """在主线程上调度一次后台预热. 用于 reset_to_idle 之后保持 ALSA 句柄热."""
+        # 录音中千万不要预热 — 会真的占用 PulseAudio 输入流跟我们正式
+        # 录音的 stream 抢资源.
+        if self.app_state.recording_state != RecordingState.IDLE:
+            return
+        import threading as _th
+        _th.Thread(
+            target=self._prewarm_audio,
+            name="prewarm-audio",
+            daemon=True,
+        ).start()
 
     # ---- PTT callbacks (run on GTK main thread) ----
 

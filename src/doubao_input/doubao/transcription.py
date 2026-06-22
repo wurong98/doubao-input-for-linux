@@ -114,18 +114,11 @@ class TranscriptionManager:
         if self.on_overlay_show:
             self.on_overlay_show()
 
-        # Start audio immediately (buffered in ASR client until WS connects)
-        try:
-            self.audio_capture.start(on_audio_data=self.asr_client.send_audio)
-        except Exception as e:
-            logger.error("Audio capture failed: %s", e)
-            self.app_state.error_message = "麦克风启动失败"
-            GLib.timeout_add(
-                int(AUTH_EXPIRY_DELAY * 1000), self._reset_to_idle
-            )
-            return
-
-        # Try cached params first, fall back to WebView extraction
+        # 1. 先发起 WS 连接 (后台 asyncio 线程, 立即返回). ASR client 自带
+        #    `_pending_audio` 缓冲, 连接好之前 audio_capture 送来的字节会
+        #    缓存, 连上后立刻 flush. 所以这两步可以并行, 而不是串行 ——
+        #    实测在 X11/PulseAudio 上 audio_capture.start() 冷态要 ~270ms,
+        #    WS 连接也要 ~170ms; 串行 ~440ms, 并行只剩 max(270,170)=270ms.
         cached = ParamsStore.load()
         if cached:
             logger.info("Using cached ASR params")
@@ -139,6 +132,23 @@ class TranscriptionManager:
             GLib.timeout_add(
                 int(AUTH_EXPIRY_DELAY * 1000), self._reset_to_idle
             )
+            return
+
+        # 2. 然后开 PortAudio (这是真正阻塞的那一步, ~270ms 冷态 / ~5ms 热态).
+        try:
+            self.audio_capture.start(on_audio_data=self.asr_client.send_audio)
+        except Exception as e:
+            logger.error("Audio capture failed: %s", e)
+            self.app_state.error_message = "麦克风启动失败"
+            # 音频起不来, 把刚连上的 WS 也拆掉
+            try:
+                self.asr_client.disconnect()
+            except Exception:
+                pass
+            GLib.timeout_add(
+                int(AUTH_EXPIRY_DELAY * 1000), self._reset_to_idle
+            )
+            return
 
     def _stop_recording(self) -> None:
         logger.info("Stopping recording...")
