@@ -54,6 +54,13 @@ class EvdevPtt:
         self._paths: list[str] = []
         self._rescan_interval = 1.0
         self._last_rescan = 0.0
+        # 注入期屏蔽自身: xdotool type --clearmodifiers 会通过 X 协议合成
+        # keyup/keydown 事件, 如果某个 /dev/input/event* 是 X 协议反射创建
+        # 的虚拟键盘 (我们自己的 uinput 设备就是这种), 这些合成事件会从
+        # /dev/input/event* 流回来被我们当成"用户又按了右 Ctrl"——表现为
+        # 注入完成后立刻再触发一次空录音, 体感上 "老重启".
+        # 调用方在注入前 set, 注入后 clear.
+        self._suppressed = threading.Event()
 
     # ---- public ----
 
