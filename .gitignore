@@ -51,7 +51,7 @@ Thumbs.db
 *.pid
 
 # Local secrets / session data
-asr_params.json
+doubao_params.json
 *.swp
 
 # Build artifacts (deb, dist)

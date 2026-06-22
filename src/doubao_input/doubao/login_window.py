@@ -1,22 +1,27 @@
 """WebKitGTK-based login window for doubao.com.
 
-Mirrors WebViewManager.swift.
+Mirrors WebViewManager.swift (macOS).
 
-- Loads doubao.com/chat in a WebKitGTK WebView
+- Loads doubao.com/chat in a WebKit2 4.0 WebView (GTK3)
 - Injects JS to detect login via /alice/profile/self API interception
 - Extracts cookies + localStorage params after login
 - Destroys WebView after params are extracted to free memory
+
+GTK3/WebKit2-4.0 port note: The original file targeted GTK4 +
+WebKitGTK 6 with a fallback to WebKit2 4.1. On Ubuntu 20.04 we only
+have WebKit2 4.0, whose JS API uses `run_javascript` / `run_javascript_finish`
+returning `WebKitJavascriptResult` (not `evaluate_javascript_finish`).
+Cookies live on the WebView's context, not a NetworkSession.
 """
 
 from __future__ import annotations
 
-import importlib.resources  # noqa: F401  # kept for forward compat; resources now loaded via Path
 import json
 import logging
 
 import gi
 
-gi.require_version("Gtk", "4.0")
+gi.require_version("Gtk", "3.0")
 from gi.repository import GLib, Gtk
 
 from doubao_input.doubao.app_state import AppState, LoginStatus
@@ -25,29 +30,25 @@ from doubao_input.doubao.params_store import ASRParams
 
 logger = logging.getLogger(__name__)
 
-# Try WebKitGTK
+# WebKit2 4.0 (the only WebKit version on Ubuntu 20.04). We deliberately
+# don't probe for WebKit 6 / WebKit2 4.1 here — those require GTK 4 and
+# this fork targets GTK 3.
 _HAS_WEBKIT = False
 try:
-    gi.require_version("WebKit", "6.0")
-    from gi.repository import WebKit
+    gi.require_version("WebKit2", "4.0")
+    from gi.repository import WebKit2 as WebKit
 
     _HAS_WEBKIT = True
-except (ImportError, ValueError):
-    try:
-        gi.require_version("WebKit2", "4.1")
-        from gi.repository import WebKit2 as WebKit
-
-        _HAS_WEBKIT = True
-    except (ImportError, ValueError):
-        pass
+except (ImportError, ValueError) as exc:
+    logger.warning("WebKit2 4.0 not available: %s", exc)
 
 
 class LoginWindow:
-    """WebKitGTK-based login window for doubao.com."""
+    """WebKit2-4.0-based login window for doubao.com (GTK3)."""
 
     def __init__(self, app_state: AppState) -> None:
         self.app_state = app_state
-        self._window: Gtk.Window | None = None
+        self._window = None  # type: ignore[assignment]
         self._webview = None
         self._on_login_status_change = None  # (status, nickname) -> None
 
@@ -63,7 +64,7 @@ class LoginWindow:
         if self._webview or not _HAS_WEBKIT:
             return
 
-        # WebKitGTK configuration
+        # WebKitGTK settings
         settings = WebKit.Settings()
         settings.set_property("enable-developer-extras", True)
         settings.set_property("user-agent", WEBVIEW_USER_AGENT)
@@ -74,11 +75,9 @@ class LoginWindow:
         # Inject login detection JS at document start
         ws_js = self._load_js_resource("inject-websocket.js")
         if ws_js:
-            # WebKitGTK uses the same messageHandlers API as WKWebView
-            # Normalize handler name
             adapted_js = ws_js.replace(
                 "window.webkit.messageHandlers.asrHandler.postMessage",
-                "window.webkit.messageHandlers.asr_handler.postMessage"
+                "window.webkit.messageHandlers.asr_handler.postMessage",
             )
             script = WebKit.UserScript.new(
                 adapted_js,
@@ -101,30 +100,26 @@ class LoginWindow:
             )
             user_content.add_script(script)
 
-        # Register message handler. WebKitGTK 6 accepts a content-world
-        # argument; older WebKit2GTK only accepts the handler name.
-        try:
-            user_content.register_script_message_handler("asr_handler", None)
-        except TypeError:
-            user_content.register_script_message_handler("asr_handler")
+        # Register message handler. WebKit2 4.0 only takes the handler name.
+        user_content.register_script_message_handler("asr_handler")
         user_content.connect(
             "script-message-received::asr_handler", self._on_script_message
         )
 
-        # Create WebView. WebKitGTK 6 has no
-        # new_with_user_content_manager(); the construct-only property
-        # works on both WebKitGTK 6 and WebKit2GTK 4.x.
+        # Create WebView with the user content manager (construct-only prop).
         self._webview = WebKit.WebView(user_content_manager=user_content)
         self._webview.set_settings(settings)
         self._webview.connect("load-changed", self._on_load_changed)
         self._webview.connect("decide-policy", self._on_decide_policy)
 
-        # Create window
+        # GTK3 window
         self._window = Gtk.Window()
         self._window.set_title("Doubao Murmur - 登录")
         self._window.set_default_size(1280, 800)
-        self._window.set_child(self._webview)
-        self._window.connect("close-request", self._on_close_request)
+        self._window.set_position(Gtk.WindowPosition.CENTER)
+        self._window.add(self._webview)
+        # GTK3 uses delete-event (returning True hides instead of destroys).
+        self._window.connect("delete-event", self._on_delete_event)
 
     def load(self) -> None:
         """Create webview (if needed) and load doubao.com."""
@@ -136,21 +131,27 @@ class LoginWindow:
         if not self._webview:
             self.load()
         if self._window:
+            self._window.show_all()
             self._window.present()
 
     def hide(self) -> None:
         if self._window:
-            self._window.set_visible(False)
+            self._window.hide()
 
     def destroy(self) -> None:
         """Destroy WebView to free memory (mirrors destroyWebView())."""
         if self._webview:
-            self._webview.stop_loading()
+            try:
+                self._webview.stop_loading()
+            except Exception:
+                pass
             self._webview = None
         if self._window:
             self._window.destroy()
             self._window = None
         logger.info("WebView destroyed")
+
+    # ---- Param extraction ----
 
     def extract_params_async(self, callback) -> None:
         """Extract cookies + localStorage params from WebView.
@@ -161,22 +162,20 @@ class LoginWindow:
             callback(None)
             return
 
-        # Step 1: Get cookies via WebKit.CookieManager
         cookie_manager = self._get_cookie_manager()
 
-        def on_cookies_finish(source, result=None, *_args):
-            if result is None:
-                result = source
+        def on_cookies_finish(source, result, *_args):
             try:
                 cookies = cookie_manager.get_cookies_finish(result)
-            except Exception:
+            except Exception as exc:
+                logger.error("Cookie fetch failed: %s", exc)
                 GLib.idle_add(callback, None)
                 return
 
-            doubao_cookies: dict[str, str] = {}
+            doubao_cookies = {}
             for cookie in cookies:
                 domain = cookie.get_domain()
-                if "doubao.com" in domain:
+                if domain and "doubao.com" in domain:
                     doubao_cookies[cookie.get_name()] = cookie.get_value()
 
             if not doubao_cookies:
@@ -184,15 +183,10 @@ class LoginWindow:
                 GLib.idle_add(callback, None)
                 return
 
-            # Step 2: Extract localStorage values via JS
             self._extract_local_storage(doubao_cookies, callback)
 
-        cookie_manager.get_cookies(
-            LOGIN_URL,
-            None,  # cancellable
-            on_cookies_finish,
-            None,  # user_data
-        )
+        # WebKit2 4.0: get_cookies(uri, cancellable, callback, user_data)
+        cookie_manager.get_cookies(LOGIN_URL, None, on_cookies_finish, None)
 
     def _extract_local_storage(self, cookies: dict, callback) -> None:
         """Extract device_id and web_id from localStorage."""
@@ -203,12 +197,11 @@ class LoginWindow:
         })
         """
 
-        def on_js_finish(source, result=None, *_args):
-            if result is None:
-                result = source
+        def on_js_finish(source, result, *_args):
             try:
-                js_value = self._webview.evaluate_javascript_finish(result)
-                json_str = js_value.to_string()
+                # WebKit2 4.0: returns WebKitJavascriptResult
+                js_result = self._webview.run_javascript_finish(result)
+                json_str = self._js_result_to_string(js_result)
                 data = json.loads(json_str)
 
                 device_id = ""
@@ -246,32 +239,19 @@ class LoginWindow:
                 logger.error("JS evaluation failed: %s", e)
                 GLib.idle_add(callback, None)
 
-        self._webview.evaluate_javascript(
-            js_code,
-            -1,
-            None,  # world_name
-            None,  # source_uri
-            None,  # cancellable
-            on_js_finish,
-            None,  # user_data
-        )
+        # WebKit2 4.0: run_javascript(script, cancellable, callback, user_data)
+        self._webview.run_javascript(js_code, None, on_js_finish, None)
 
     def _get_cookie_manager(self):
-        """WebKitGTK 6 moved cookies to NetworkSession; 4.x uses the
-        website data manager."""
-        if hasattr(self._webview, "get_network_session"):
-            return self._webview.get_network_session().get_cookie_manager()
-        return self._webview.get_website_data_manager().get_cookie_manager()
+        """WebKit2 4.0: cookies live on the WebContext."""
+        return self._webview.get_context().get_cookie_manager()
 
-    def _get_website_data_manager(self):
-        if hasattr(self._webview, "get_network_session"):
-            return self._webview.get_network_session().get_website_data_manager()
-        return self._webview.get_website_data_manager()
+    # ---- Login detection ----
 
     def _on_script_message(self, manager, js_result) -> None:
         """Handle messages from injected JS (login detection)."""
         try:
-            json_str = self._json_string_from_js_value(js_result)
+            json_str = self._js_result_to_string(js_result)
             data = json.loads(json_str)
         except Exception:
             return
@@ -287,46 +267,39 @@ class LoginWindow:
             GLib.timeout_add(2000, self._check_login_fallback)
 
     def _on_decide_policy(self, webview, decision, decision_type) -> bool:
-        """Detect login redirect via URL parameter."""
         if decision_type == WebKit.PolicyDecisionType.NAVIGATION_ACTION:
-            nav_action = decision.get_navigation_action()
-            uri = nav_action.get_request().get_uri()
-            if "from_login=1" in uri:
-                self._notify_login_status("loggedIn", None)
-        return False  # Allow default handling
+            try:
+                nav_action = decision.get_navigation_action()
+                uri = nav_action.get_request().get_uri()
+                if uri and "from_login=1" in uri:
+                    self._notify_login_status("loggedIn", None)
+            except Exception:
+                pass
+        return False  # default handling
 
     def _check_login_fallback(self) -> bool:
-        """Fallback: check if login button is present in DOM."""
         if not self._webview:
             return GLib.SOURCE_REMOVE
         js = "window.__doubaoMurmur && window.__doubaoMurmur.isLoginButtonPresent()"
-        self._webview.evaluate_javascript(
-            js,
-            -1,
-            None,
-            None,
-            None,
-            self._on_login_check_result,
-            None,
-        )
-        return GLib.SOURCE_REMOVE
 
-    def _on_login_check_result(self, source, result=None, *_args) -> None:
-        if result is None:
-            result = source
-        try:
-            if self._webview:
-                val = self._webview.evaluate_javascript_finish(result)
-                if val.to_boolean():
+        def on_result(source, result, *_args):
+            try:
+                if not self._webview:
+                    return
+                js_result = self._webview.run_javascript_finish(result)
+                value = js_result.get_js_value()
+                if value.to_boolean():
                     if self.app_state.login_status == LoginStatus.CHECKING:
                         self.app_state.login_status = LoginStatus.NOT_LOGGED_IN
-        except Exception:
-            pass
+            except Exception:
+                pass
 
-    def _on_close_request(self, window) -> bool:
-        """Hide instead of destroy when user closes the window."""
-        window.set_visible(False)
-        return True  # Prevent default destroy
+        self._webview.run_javascript(js, None, on_result, None)
+        return GLib.SOURCE_REMOVE
+
+    def _on_delete_event(self, window, _event) -> bool:
+        window.hide()
+        return True  # don't actually destroy
 
     def logout(self) -> None:
         """Clear saved params and reload."""
@@ -338,13 +311,21 @@ class LoginWindow:
             self._clear_website_data(self.load)
 
     def _clear_website_data(self, callback=None) -> None:
-        """Clear WebKitGTK website data for this app before reloading login."""
+        """WebKit2 4.0: WebsiteDataManager hangs off the WebContext."""
         if not self._webview:
             if callback:
                 callback()
             return
+        try:
+            data_manager = self._webview.get_website_data_manager()
+        except Exception:
+            try:
+                data_manager = self._webview.get_context().get_website_data_manager()
+            except Exception:
+                if callback:
+                    callback()
+                return
 
-        data_manager = self._get_website_data_manager()
         clear = getattr(data_manager, "clear", None)
         if clear is None:
             if callback:
@@ -355,34 +336,59 @@ class LoginWindow:
         if types is None:
             types = 0xFFFFFFFF
 
-        def on_clear_finished(source, result=None, *_args):
+        def on_done(source, result, *_args):
             finish = getattr(data_manager, "clear_finish", None)
             if finish is not None and result is not None:
                 try:
                     finish(result)
                 except Exception as e:
-                    logger.warning("Failed to finish WebKit data clear: %s", e)
+                    logger.warning("WebKit clear_finish failed: %s", e)
             if callback:
                 callback()
 
         try:
-            clear(types, 0, None, on_clear_finished, None)
+            clear(types, 0, None, on_done, None)
         except TypeError:
-            clear(types, 0, None, on_clear_finished)
+            clear(types, 0, None, on_done)
 
-    def _notify_login_status(self, status: str, nickname: str | None) -> None:
+    def _notify_login_status(self, status: str, nickname) -> None:
         if self._on_login_status_change:
             self._on_login_status_change(status, nickname)
 
+    # ---- helpers ----
+
     @staticmethod
-    def _json_string_from_js_value(value) -> str:
-        """Convert WebKitGTK/JSC script message values to a JSON string."""
-        if isinstance(value, str):
-            return value
-        if isinstance(value, dict):
-            return json.dumps(value)
-        if hasattr(value, "get_js_value"):
-            value = value.get_js_value()
+    def _js_result_to_string(js_result) -> str:
+        """Convert a WebKit2 4.0 WebKitJavascriptResult to a JSON string.
+
+        Also handles the case where the script message handler passes us
+        a raw JSC value, or a dict already (unit-test convenience).
+        """
+        if isinstance(js_result, str):
+            return js_result
+        if isinstance(js_result, dict):
+            return json.dumps(js_result)
+
+        # WebKit2 4.0 WebKitJavascriptResult.get_js_value() -> JSC.Value
+        value = js_result
+        get_js_value = getattr(js_result, "get_js_value", None)
+        if get_js_value is not None:
+            value = get_js_value()
+
+        # JSC.Value disambiguation:
+        # - JS 里写 `JSON.stringify({...})` 返回的是一个 JS 字符串. 对
+        #   JSC string value 调 `to_json()` 会再做一次 JSON 编码 (变成
+        #   `"\"{...}\""`), 再 `json.loads` 就只剥一层引号, 得到的
+        #   还是 string, 后续 `.get` 就崩.
+        # - 正确做法: 如果 JSC.Value 是字符串, 用 `to_string()` 拿原文.
+        is_string = getattr(value, "is_string", None)
+        if callable(is_string):
+            try:
+                if is_string():
+                    return value.to_string()
+            except Exception:
+                pass
+        # 非字符串 (对象/数组/数字/布尔/null) 才走 to_json.
         to_json = getattr(value, "to_json", None)
         if to_json is not None:
             try:
@@ -394,10 +400,10 @@ class LoginWindow:
         to_string = getattr(value, "to_string", None)
         if to_string is not None:
             return to_string()
-        raise TypeError(f"Unsupported JS value: {type(value)!r}")
+        raise TypeError(f"Unsupported JS value: {type(js_result)!r}")
 
     @staticmethod
-    def _load_js_resource(name: str) -> str | None:
+    def _load_js_resource(name: str):
         """Load JS file from resources directory (../login/resources)."""
         try:
             from pathlib import Path

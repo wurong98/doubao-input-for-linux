@@ -7,7 +7,7 @@ name = "doubao-input"
 version = "1.0.0"
 description = "Global push-to-hold voice input for Linux/Wayland, backed by Doubao ASR"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.8"
 license = { text = "MIT" }
 authors = [{ name = "doubao-input contributors" }]
 classifiers = [
@@ -20,7 +20,10 @@ classifiers = [
     "Topic :: Utilities",
 ]
 dependencies = [
-    "websockets>=12",
+    # On Python 3.8 we need the last release line that supports it; the
+    # ASR client already abstracts the additional_headers vs extra_headers
+    # API difference so 10.x is fine.
+    "websockets>=10,<12",
     "sounddevice>=0.4.6",
     "evdev>=1.4",
 ]

@@ -1,7 +1,7 @@
 """Persist ASR params (cookies, device_id, web_id) to a JSON file.
 
 Mirrors ASRParamsStore.swift.
-Location: $XDG_CONFIG_HOME/doubao-input/asr_params.json
+Location: $XDG_CONFIG_HOME/doubao-input/doubao_params.json
 """
 
 from __future__ import annotations

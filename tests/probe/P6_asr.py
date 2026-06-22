@@ -7,7 +7,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 from doubao_input.doubao.params_store import ParamsStore
 from doubao_input.doubao.asr_client import ASRClient
 from doubao_input.doubao.audio_capture import AudioCapture
-import gi; gi.require_version("Gtk","4.0")
+import gi; gi.require_version("Gtk","3.0")
 
 params = ParamsStore.load()
 if not params:

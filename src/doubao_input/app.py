@@ -17,7 +17,7 @@ import sys
 
 import gi
 
-gi.require_version("Gtk", "4.0")
+gi.require_version("Gtk", "3.0")
 from gi.repository import GLib, Gtk  # type: ignore
 
 from doubao_input.doubao.app_state import AppState, LoginStatus, RecordingState
@@ -30,6 +30,7 @@ from doubao_input.inject.injector import Injector
 from doubao_input.trigger.evdev_ptt import EvdevPtt
 from doubao_input.ui.control_window import ControlWindow
 from doubao_input.ui.overlay import Overlay
+from doubao_input.ui.tray import Tray
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +54,7 @@ class DoubaoInputApp(Gtk.Application):
         self._ptt: EvdevPtt | None = None
         self._tm: TranscriptionManager | None = None
         self._injector: Injector | None = None
+        self._tray: Tray | None = None
         self._last_press_at: float = 0.0
 
     # ---- Gtk.Application hooks (signal handlers, not do_*) ----
@@ -62,6 +64,10 @@ class DoubaoInputApp(Gtk.Application):
         if not self._setup_done:
             self._setup_done = True
             self._build()
+            # 即使所有窗口都隐藏 (用户点关闭把主窗口收进托盘),
+            # 也要让进程继续运行: hold() 一次, Application.run() 才不会
+            # 在 "no active window" 时退出. 退出走托盘菜单 / 主窗口的退出按钮.
+            self.hold()
         if self._control:
             self._control.show()
         # Boot-time proof-of-life: briefly flash the floating overlay so
@@ -79,6 +85,8 @@ class DoubaoInputApp(Gtk.Application):
 
     def _on_shutdown(self, _app) -> None:
         logger.info("shutting down")
+        if self._tray:
+            self._tray.destroy()
         if self._ptt:
             self._ptt.stop()
         if self._injector:
@@ -146,6 +154,24 @@ class DoubaoInputApp(Gtk.Application):
         if not self._ptt.start():
             logger.warning("evdev PTT failed to start; will retry in background")
             # Don't block; user can still open the control window to diagnose.
+
+        # ---- Tray (AppIndicator3, GNOME on X11) ----
+        # CLAUDE.md: 必须静默退化, 不能因 indicator 缺失阻塞主流程.
+        try:
+            self._tray = Tray(
+                on_show_window=lambda: self._control.show() if self._control else None,
+                on_check_mic=self._check_mic,
+                on_quit=self._quit,
+            )
+        except Exception as e:
+            logger.warning("tray init failed (silently): %s", e)
+            self._tray = None
+
+        # 录音状态 -> 托盘图标状态切换
+        if self._tray is not None:
+            def _on_rec_changed(_state, value: str) -> None:
+                self._tray.set_recording(value in ("recording", "starting"))
+            self.app_state.connect("recording-state-changed", _on_rec_changed)
 
         logger.info("build complete")
 
@@ -296,6 +322,9 @@ class DoubaoInputApp(Gtk.Application):
         try:
             cap.start(on_audio_data=lambda b: None)
         except Exception as e:
+            # 把 traceback 写进日志, 否则用户在 overlay 上只看到一行
+            # "麦克风启动失败: <err>" 没法定位真因 (PortAudio? PulseAudio? 设备权限?).
+            logger.exception("_check_mic start failed")
             self._overlay.set_text(f"麦克风启动失败: {e}")
             GLib.timeout_add(1500, lambda: self._overlay.hide() or False)
             return
@@ -321,9 +350,18 @@ class DoubaoInputApp(Gtk.Application):
             self._ptt.stop()
         if self._injector:
             self._injector.close()
+        # 配对 `_on_activate` 里的 hold(), 否则 quit() 会等到所有
+        # hold 计数清零才真正退出.
+        try:
+            self.release()
+        except Exception:
+            pass
         self.quit()
 
 
 def Gio_APPLICATION_NON_UNIQUE():
     from gi.repository import Gio  # type: ignore
-    return Gio.ApplicationFlags.FLAGS_NONE
+    # 真的 NON_UNIQUE: 每个 `python -m doubao_input` 都跑独立进程, 不
+    # 通过 D-Bus 名注册做单实例 — 否则上一次没退干净的实例会把当前
+    # 启动当成二次激活, 让 start.sh 看到 PID 立刻消失而判定失败.
+    return Gio.ApplicationFlags.NON_UNIQUE

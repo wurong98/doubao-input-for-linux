@@ -275,7 +275,7 @@ src/doubao_input/
 | **P2** | uinput 注入（地基） | `wl-copy` + UInput 发 Ctrl+V，注入到 gedit/浏览器 | **免 sudo**，中文经剪贴板路径正确落字（见 §5.2） |
 | **P3** | 音频采集 + 音量 | `sounddevice` 开 16k/mono/int16 流，打印每块 RMS | 拿到稳定 int16 数据；出声时 RMS 明显上升、静音时接近 0（驱动 §6.1 波形） |
 | **P4** | 剪贴板 | `wl-copy "abc" && wl-paste` | 回显 `abc` |
-| **P5** | 豆包登录 + 凭证提取 | 跑复用的 `login_window`，WebKitGTK 登录豆包，提取 cookies + device_id + web_id | 登录态被 JS 拦截识别；`asr_params.json` 写出非空凭证 |
+| **P5** | 豆包登录 + 凭证提取 | 跑复用的 `login_window`，WebKitGTK 登录豆包，提取 cookies + device_id + web_id | 登录态被 JS 拦截识别；`doubao_params.json` 写出非空凭证 |
 | **P6** | 豆包 ASR 链路（**外部依赖，易变**） | 用 P5 的凭证连 WSS，发一段 16k PCM，收 `event=result` | 拿到非空 `result.Text`；认证失效能被识别（验证 §8 风险） |
 
 > P5/P6 依赖豆包线上接口，是唯一可能"今天通明天变"的环节，应**最先用复用代码验证一次**，确认逆向逻辑仍有效后再继续。
@@ -298,7 +298,7 @@ src/doubao_input/
 2. 说"今天天气怎么样" → 胶囊实时显示文字、波形跳动
 3. 松开右 Ctrl → 胶囊淡出、文字落入 gedit
 4. 极短轻点右 Ctrl → 不应注入任何东西（防误触）
-5. 删掉 `asr_params.json` 再触发 → 应弹出重新登录
+5. 删掉 `doubao_params.json` 再触发 → 应弹出重新登录
 
 ---
 

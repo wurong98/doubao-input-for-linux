@@ -1,32 +1,27 @@
-"""Top-center floating overlay: 圆角胶囊 + 波形 + 文字。
+"""Top-center floating overlay: 圆角胶囊 + 波形 + 文字.
 
 视觉规范(用户反馈,2026-06-21):
   1. 整体圆滑,圆角
   2. 动效只发生在外边,文字与候选字区域保持绝对静态、
      纯白高对比度
-  3. 呼吸: alpha 在 0.45 ~ 0.85 之间循环(2.4s 周期)
-  4. 敲击触发流光(每打一字闪一次): 短暂跳到 0.95
-     持续 220ms,再 400ms 衰减回呼吸
+  3. 呼吸: alpha 在 0.78 ~ 0.98 之间循环(2.4s 周期)
+  4. 敲击触发流光(每打一字闪一次): 短暂跳到 1.00 持续 220ms,
+     再 400ms 衰减回呼吸
   5. 越柔和越好
 
-实现策略(经过两次 bug 后):
-  - 单层 widget 树:Gtk.Window -> Gtk.Box(VERTICAL) -> wave + label
-  - 圆角 + 半透明背景:用 Gtk.CssProvider 注入 box 的样式
-    (border-radius + background-color alpha),wayland 跨 backend
-    都稳定
-  - 呼吸: 调 Gtk.Window.set_opacity(alpha) 整体呼吸。
-    因为整体呼吸会带着圆角一起淡,看起来像面板在呼吸
-  - 敲击: 同样靠 set_opacity 跳到 0.95
-  - 文字/wave 保持高对比、纯白,不受 alpha 调低影响——
-    实际 GTK 的 set_opacity 是调 widget 整体,文字也会变
-    暗;为此我们把呼吸范围限制在 0.65~0.95,文字最低 65%
-    不透明,仍然清晰
+GTK3 端口实现 (原本是 GTK4):
+  - `Gtk.Window(type=POPUP)` + `set_app_paintable(True)` + RGBA
+    visual 让背景真正透明。
+  - 主面板用一层 `Gtk.DrawingArea`,通过 `draw` 信号画圆角胶囊
+    + 波形 bars。文字仍走 `Gtk.Label`,叠在 box 上方靠 stacking。
+  - 呼吸/流光仍走 `Gtk.Window.set_opacity()`,GTK3 在 X11 下需要
+    合成器(我们这里是 GNOME on X11,有 Mutter 合成器,可以
+    工作)。
+  - 60ms `GLib.timeout` 驱动重绘 (`queue_draw`)。
 
-  - 60ms GLib.timeout 驱动
-
-The window is Gtk.Window (borderless, never accepts focus), so
-the floating 波形胶囊 never steals focus from the user's input
-field.
+The window is borderless (POPUP) and `set_accept_focus(False)`,
+so the floating 波形胶囊 never steals focus from the user's
+input field.
 """
 from __future__ import annotations
 
@@ -38,46 +33,46 @@ from typing import Optional
 
 import gi
 
-import cairo  # for cairo.ImageSurface used in Gdk.Texture rendering
+import cairo
 
-gi.require_version("Gtk", "4.0")
+gi.require_version("Gtk", "3.0")
 from gi.repository import GLib, Gdk, Gtk  # type: ignore
 
 logger = logging.getLogger(__name__)
 
 # ----- Geometry -----
 OVERLAY_WIDTH = 560
-# Vertical stack: wave (40) + spacing (6) + 2-line label (43) +
-# margins (12 + 12) = 113.  Round up to 116 for breathing room.
 OVERLAY_HEIGHT = 116
 WAVE_BARS = 24
 WAVE_BAR_W = 4
 WAVE_BAR_GAP = 3
 WAVE_BAR_MAX_H = 24
-CORNER_PX = 18  # 圆角半径(px),通过 CSS border-radius 应用
+CORNER_PX = 18  # 圆角半径(px)
 
 # ----- Animation parameters -----
 TICK_MS = 60                              # ~16 fps
 BREATH_PERIOD_S = 2.4                     # 一次呼吸周期
-# 我们用 window-level opacity 调呼吸,所以这个范围 = 整体面板透明度。
-# 故意不调到 0(否则文字看不到),只调 0.78 ~ 0.98,文字全程可读。
 OPACITY_BREATH_MIN = 0.78
 OPACITY_BREATH_MAX = 0.98
-GLINT_PEAK_OPACITY = 1.00                 # 敲击跳到这(全亮)
+GLINT_PEAK_OPACITY = 1.00
 GLINT_HOLD_S = 0.22
 GLINT_DECAY_S = 0.40
 
+# Cairo colors -- duplicated of the GTK4 CSS values for parity.
+PANEL_BG_RGBA = (18 / 255.0, 20 / 255.0, 26 / 255.0, 0.78)
+PANEL_BORDER_RGBA = (1.0, 1.0, 1.0, 0.30)
+WAVE_BAR_RGBA = (0.50, 0.95, 0.65, 0.95)
+
 
 class Overlay:
-    """The floating 圆角 波形胶囊."""
+    """The floating 圆角 波形胶囊 (GTK3)."""
 
     def __init__(self) -> None:
         self._window: Optional[Gtk.Window] = None
+        self._panel: Optional[Gtk.DrawingArea] = None
         self._label: Optional[Gtk.Label] = None
-        self._wave: Optional[Gtk.Picture] = None
-        self._box: Optional[Gtk.Box] = None
-        self._bars: deque[float] = deque([0.0] * WAVE_BARS, maxlen=WAVE_BARS)
-        self._ticker_src: int | None = None
+        self._bars: deque = deque([0.0] * WAVE_BARS, maxlen=WAVE_BARS)
+        self._ticker_src: Optional[int] = None
         self._t0: float = 0.0
         self._glint_t: Optional[float] = None
         self._status_text: str = ""
@@ -92,13 +87,14 @@ class Overlay:
         self._status_text = status
         self._refresh_label()
         if not self._visible:
-            self._window.set_visible(True)
+            self._window.show_all()
+            self._reposition()
             self._visible = True
         self._arm_ticker()
 
     def hide(self) -> None:
         if self._window and self._visible:
-            self._window.set_visible(False)
+            self._window.hide()
             self._visible = False
         if self._ticker_src is not None:
             try:
@@ -137,113 +133,94 @@ class Overlay:
     def _ensure_window(self) -> None:
         if self._window is not None:
             return
-        win = Gtk.Window()
+        # POPUP 窗口: 无装饰, 不抢焦点, 不入任务栏.
+        win = Gtk.Window(type=Gtk.WindowType.POPUP)
         win.set_title("doubao-input overlay")
         win.set_decorated(False)
-        win.set_resizable(True)
+        win.set_resizable(False)
+        win.set_accept_focus(False)
+        win.set_focus_on_map(False)
+        win.set_skip_taskbar_hint(True)
+        win.set_skip_pager_hint(True)
+        win.set_keep_above(True)
         win.set_default_size(OVERLAY_WIDTH, OVERLAY_HEIGHT)
-        win.set_focus_on_click(False)
-        win.set_can_focus(False)
 
-        # Center horizontally, near the top.
+        # 让窗口真正透明: app_paintable + RGBA visual.
+        # 没有这一步, 背景会变成默认主题色(纯白), 圆角外露白底.
         try:
-            display = Gdk.Display.get_default()
-            if display is not None:
-                monitors = display.get_monitors()
-                if monitors.get_n_items() > 0:
-                    mon = monitors.get_item(0)
-                    geo = mon.get_geometry()
-                    _ = (geo.x + (geo.width - OVERLAY_WIDTH) // 2,
-                         geo.y + 24)
+            screen = win.get_screen()
+            visual = screen.get_rgba_visual()
+            if visual is not None:
+                win.set_visual(visual)
         except Exception:
             pass
+        win.set_app_paintable(True)
 
-        # Single widget tree: box directly under window.  Inside box
-        # we put the wave (top) and label (bottom).  The whole box
-        # has a CSS background = dark translucent + 1.5px white border
-        # + 18px border-radius.  This avoids the Gtk.Overlay positioning
-        # bug that hid the label in commit de11f91.
-        #
-        # Box margins are ZERO — the box fills the entire window so
-        # the round-corner CSS background covers the whole window
-        # (no white window-default background leaking out).
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        box.set_halign(Gtk.Align.FILL)
-        box.set_valign(Gtk.Align.FILL)
-        box.set_hexpand(True)
-        box.set_vexpand(True)
-        # CSS provider:
-        #   - window { background: none } makes the window itself
-        #     transparent so the box's CSS background is what shows.
-        #   - box { border-radius + background + border } gives the
-        #     rounded translucent panel.
-        # Without the window-level rule, GTK fills the area between
-        # the box and the window edge with default white, which is
-        # the "white square" the user is seeing.
-        provider = Gtk.CssProvider()
-        css = (
-            "window { background: none; background-color: transparent; }"
-            "box {"
-            f"  border-radius: {CORNER_PX}px;"
-            "  background-color: rgba(18, 20, 26, 0.78);"
-            f"  border: 1.5px solid rgba(255, 255, 255, 0.30);"
-            "  padding: 18px 18px 12px 18px;"
-            "}"
-        )
-        try:
-            provider.load_from_data(css.encode("utf-8"))
-        except Exception:
-            try:
-                provider.load_from_data(css)
-            except Exception:
-                pass
-        # Apply to BOTH the window (so the area outside the box is
-        # transparent) and the box (for rounded background + border).
-        try:
-            win.get_style_context().add_provider(
-                provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
-            )
-        except Exception:
-            pass
-        try:
-            box.get_style_context().add_provider(
-                provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
-            )
-        except Exception:
-            pass
-        self._box = box
-        self._css_provider = provider
+        # 唯一子 widget: 一个 Overlay 容器, 底层是画圆角面板的
+        # DrawingArea, 上层叠一个 Label 显示文字 (静态, 不参与
+        # 呼吸动画的颜色变化).
+        ov = Gtk.Overlay()
 
-        # Wave (top).
-        wave = Gtk.Picture()
-        wave.set_size_request(WAVE_BARS * (WAVE_BAR_W + WAVE_BAR_GAP) + 4, 40)
-        wave.set_can_shrink(False)
-        wave.set_halign(Gtk.Align.CENTER)
-        self._wave = wave
-        self._wave_tex: Optional[Gdk.Texture] = None
-        box.append(wave)
+        panel = Gtk.DrawingArea()
+        panel.set_size_request(OVERLAY_WIDTH, OVERLAY_HEIGHT)
+        panel.connect("draw", self._on_draw_panel)
+        ov.add(panel)
+        self._panel = panel
 
-        # Text label (bottom).
         label = Gtk.Label()
         label.set_xalign(0.5)
         label.set_yalign(0.5)
         label.set_justify(Gtk.Justification.CENTER)
-        label.set_wrap(True)
-        label.set_wrap_mode(0)
+        label.set_line_wrap(True)
+        # GTK3: PangoWrapMode.WORD = 0
+        label.set_line_wrap_mode(0)
         label.set_size_request(360, -1)
         label.set_width_chars(14)
         label.set_lines(2)
-        # Initial text via set_text in caller (show/set_text).
+        label.set_halign(Gtk.Align.CENTER)
+        # The label sits in the lower half (under the waveform area).
+        # Top padding pushes it past the wave row; CSS not necessary.
+        label.set_margin_top(48)
+        label.set_margin_bottom(12)
+        label.set_margin_start(18)
+        label.set_margin_end(18)
         self._label = label
-        box.append(label)
+        ov.add_overlay(label)
 
-        win.set_child(box)
+        win.add(ov)
         self._window = win
 
-        self._upload_wave_texture()
-        # Set initial opacity so the first paint doesn't pop in at 1.0.
         try:
             win.set_opacity(OPACITY_BREATH_MIN)
+        except Exception:
+            pass
+
+    def _reposition(self) -> None:
+        """Center horizontally near the top of the primary monitor."""
+        if self._window is None:
+            return
+        try:
+            screen = self._window.get_screen()
+            display = screen.get_display() if screen else None
+            geo = None
+            if display is not None and hasattr(display, "get_monitor"):
+                monitor = display.get_primary_monitor() if hasattr(
+                    display, "get_primary_monitor"
+                ) else None
+                if monitor is None and hasattr(display, "get_monitor"):
+                    monitor = display.get_monitor(0)
+                if monitor is not None:
+                    geo = monitor.get_geometry()
+            if geo is None and screen is not None:
+                # Fallback for older GTK3: use screen dimensions
+                geo_w = screen.get_width()
+                geo_h = screen.get_height()
+                x = (geo_w - OVERLAY_WIDTH) // 2
+                y = 24
+            else:
+                x = geo.x + (geo.width - OVERLAY_WIDTH) // 2
+                y = geo.y + 24
+            self._window.move(x, y)
         except Exception:
             pass
 
@@ -272,7 +249,7 @@ class Overlay:
         self._ticker_src = GLib.timeout_add(TICK_MS, self._tick)
 
     def _tick(self) -> bool:
-        if not self._visible or not self._window or not self._wave:
+        if not self._visible or not self._window:
             self._ticker_src = None
             return False
         now = time.monotonic()
@@ -295,62 +272,63 @@ class Overlay:
             self._window.set_opacity(max(0.0, min(1.0, opacity)))
         except Exception:
             pass
-        self._upload_wave_texture()
+        # 重画波形/面板
+        if self._panel is not None:
+            self._panel.queue_draw()
         return True
 
-    def _upload_wave_texture(self) -> None:
-        """Render the waveform bars onto a transparent background."""
-        if self._wave is None:
-            return
+    # ---- cairo drawing ----
+
+    def _on_draw_panel(self, widget, cr) -> bool:
+        """Draw the rounded translucent panel + waveform bars."""
         try:
-            import cairo as _cairo
+            alloc = widget.get_allocation()
+            w = alloc.width
+            h = alloc.height
+
+            # Clear the window's own transparent background first
+            # (otherwise GTK fills it with theme color before draw).
+            cr.save()
+            cr.set_operator(cairo.OPERATOR_CLEAR)
+            cr.paint()
+            cr.restore()
+
+            # Rounded panel background.
+            _rounded_path(cr, 0, 0, w, h, CORNER_PX)
+            cr.set_source_rgba(*PANEL_BG_RGBA)
+            cr.fill_preserve()
+            cr.set_source_rgba(*PANEL_BORDER_RGBA)
+            cr.set_line_width(1.5)
+            cr.stroke()
+
+            # Waveform bars (centered horizontally, upper area).
             bars = list(self._bars)
             has_text = bool(self._text)
             max_bar_h = WAVE_BAR_MAX_H if not has_text else 18
-            cw = WAVE_BARS * (WAVE_BAR_W + WAVE_BAR_GAP) + 4
-            ch = 40
-            surf = _cairo.ImageSurface(_cairo.FORMAT_ARGB32, cw, ch)
-            cr = _cairo.Context(surf)
-            cr.set_operator(_cairo.OPERATOR_CLEAR)
-            cr.paint()
-            cr.set_operator(_cairo.OPERATOR_OVER)
             n = len(bars)
-            if n > 0:
-                cx0 = (cw - n * (WAVE_BAR_W + WAVE_BAR_GAP)) / 2
-                for i, v in enumerate(bars):
-                    bh = max(2.0, v * max_bar_h)
-                    x = cx0 + i * (WAVE_BAR_W + WAVE_BAR_GAP)
-                    y = (ch - bh) / 2
-                    cr.set_source_rgba(0.50, 0.95, 0.65, 0.95)
-                    _rounded_rect(cr, x, y, WAVE_BAR_W, bh, 1.5)
-                    cr.fill()
-            tex = _image_surface_to_texture(surf, cw, ch)
-            self._wave.set_paintable(tex)
-            self._wave_tex = tex
-        except Exception:
-            pass
+            wave_total_w = n * (WAVE_BAR_W + WAVE_BAR_GAP)
+            wave_x0 = (w - wave_total_w) / 2
+            wave_cy = 30  # 中线 y, 留出顶部 padding 给胶囊
+            cr.set_source_rgba(*WAVE_BAR_RGBA)
+            for i, v in enumerate(bars):
+                bh = max(2.0, v * max_bar_h)
+                x = wave_x0 + i * (WAVE_BAR_W + WAVE_BAR_GAP)
+                y = wave_cy - bh / 2
+                _rounded_path(cr, x, y, WAVE_BAR_W, bh, 1.5)
+                cr.fill()
+        except Exception as e:
+            logger.debug("overlay draw failed: %s", e)
+        return False
 
 
-def _image_surface_to_texture(surf, cw: int, ch: int) -> Gdk.Texture:
-    stride = cairo.ImageSurface.format_stride_for_width(
-        cairo.FORMAT_ARGB32, cw
-    )
-    data = surf.get_data()
-    import array as _arr
-    arr = _arr.array("B", data)
-    for i in range(0, len(arr), 4):
-        arr[i], arr[i + 2] = arr[i + 2], arr[i]
-    gbytes = GLib.Bytes.new(bytes(arr))
-    return Gdk.Texture.new_from_bytes(gbytes, cw, ch, stride)
-
-
-def _rounded_rect(cr, x, y, w, h, r) -> None:
+def _rounded_path(cr, x, y, w, h, r) -> None:
+    """Append a rounded-rectangle subpath to cr."""
     if w <= 0 or h <= 0:
         return
-    r = min(r, w / 2, h / 2)
+    r = min(r, w / 2.0, h / 2.0)
     cr.new_sub_path()
-    cr.arc(x + w - r, y + r, r, -1.5708, 0)
-    cr.arc(x + w - r, y + h - r, r, 0, 1.5708)
-    cr.arc(x + r, y + h - r, r, 1.5708, 3.1416)
-    cr.arc(x + r, y + r, r, 3.1416, 4.7124)
+    cr.arc(x + w - r, y + r, r, -math.pi / 2, 0)
+    cr.arc(x + w - r, y + h - r, r, 0, math.pi / 2)
+    cr.arc(x + r, y + h - r, r, math.pi / 2, math.pi)
+    cr.arc(x + r, y + r, r, math.pi, 3 * math.pi / 2)
     cr.close_path()

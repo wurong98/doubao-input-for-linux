@@ -45,7 +45,7 @@ AUTH_ERROR_KEYWORDS = [
 # --- Paths ---
 
 CONFIG_DIR_NAME = "doubao-input"
-PARAMS_FILE = "asr_params.json"
+PARAMS_FILE = "doubao_params.json"
 KEYBOARD_FILE = "keyboard.json"
 
 

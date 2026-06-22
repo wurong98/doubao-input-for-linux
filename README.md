@@ -32,7 +32,7 @@
 - **圆角胶囊悬浮窗** —— 18px 圆角 + 1.5px 白边 + 呼吸 alpha(0.78~0.98 / 2.4s 周期)
   + 每识别出新字触发 220ms 流光闪烁;文字始终纯白粗体不参与动效,保证可读。
 - **会话常驻** —— `systemd --user` 自启;再次启动唤起控制窗口(单实例)。
-- **凭证本地化** —— 登录一次,凭证写在 `~/.config/doubao-input/asr_params.json`,复用至下次。
+- **凭证本地化** —— 登录一次,凭证写在 `~/.config/doubao-input/doubao_params.json`,复用至下次。
 - **零 sudo 运行** —— 仅需把用户加入 `input` 组(`.deb` 的 `postinst` 自动处理)。
 
 ---
@@ -116,7 +116,7 @@ python3 -m venv .venv
 
 启动后弹出**登录窗口**,用 WebKitGTK 加载豆包网页;在 WebView 里登录成功后,
 JS 拦截到登录态,自动从 `/alice/profile/self` 抓 cookies + 从 `localStorage` 抓 `device_id` / `web_id`,
-写入 `~/.config/doubao-input/asr_params.json`,登录窗口自动关闭。
+写入 `~/.config/doubao-input/doubao_params.json`,登录窗口自动关闭。
 
 之后按下右 Ctrl 即可:
 

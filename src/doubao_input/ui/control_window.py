@@ -1,13 +1,18 @@
 """Control / status window.
 
 Single-instance app: re-launching the binary surfaces this window
-(via app.do_activate -> present()).
+(via app activate -> present()).
 
 Content:
 - 登录状态 (Logged in / Not logged in / Checking)
 - 「登录豆包」按钮  -> opens the WebKitGTK login window
 - 使用说明
 - 退出按钮
+
+GTK3 port note: 原始版本写给 GTK4，本文件已降到 GTK3。GTK3 不支持
+`Window.set_child`（用 `add`）、`Box.append`（用 `pack_start`），也没有
+`close-request`（用 `delete-event`），并且 widget 默认不可见（必须
+`show_all()`）。
 """
 from __future__ import annotations
 
@@ -16,7 +21,7 @@ from typing import Callable, Optional
 
 import gi
 
-gi.require_version("Gtk", "4.0")
+gi.require_version("Gtk", "3.0")
 from gi.repository import GLib, Gtk  # type: ignore
 
 from doubao_input.doubao.app_state import AppState, LoginStatus
@@ -48,75 +53,14 @@ class ControlWindow:
 
     def show(self) -> None:
         self._ensure_window()
+        # GTK3: child widgets are hidden by default, must show_all() first.
+        self._window.show_all()
         self._window.present()
         self._refresh_status()
-        # DEBUG: introspect our own toplevel state to prove we're actually mapped
-        import logging
-        import time
-        log = logging.getLogger(__name__)
-        try:
-            time.sleep(0.4)
-            win = self._window
-            w = win.get_width()
-            h = win.get_height()
-            mapped = win.get_mapped() if hasattr(win, "get_mapped") else "?"
-            visible = win.get_visible() if hasattr(win, "get_visible") else "?"
-            title = win.get_title()
-            surface = win.get_surface()
-            scale = surface.get_scale_factor() if surface else "?"
-            log.warning(
-                "WINDOW_STATE w=%d h=%d mapped=%s visible=%s title=%r scale=%s",
-                w, h, mapped, visible, title, scale,
-            )
-            # Try to ask the compositor about the toplevel we own.
-            try:
-                toplevel = None
-                if hasattr(win, "get_toplevel"):
-                    toplevel = win.get_toplevel()
-                native = win.get_native()
-                log.warning("WINDOW_NATIVE class=%s has_toplevel=%s",
-                            type(native).__name__ if native else None,
-                            toplevel is not None)
-            except Exception as e:
-                log.warning("WINDOW_NATIVE err: %s", e)
-        except Exception as e:
-            log.warning("window introspection failed: %s", e)
-
-    def _screenshot_to(self, path: str) -> None:
-        """Render this window's surface to a PNG using GTK's paint API.
-        Works on Wayland via the GdkSurface snapshot path."""
-        import cairo
-        win = self._window
-        if win is None:
-            return
-        try:
-            w = win.get_width()
-            h = win.get_height()
-            surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, max(w, 1), max(h, 1))
-            cr = cairo.Context(surface)
-            # GTK4: GtkWidget.snapshot() produces a GdkPaintable, not Cairo.
-            # Easier: use the snapshot path via the snapshot closure.
-            from gi.repository import Gdk, Gtk  # type: ignore
-            snapshot = Gtk.Snapshot()
-            win.snapshot(snapshot)
-            node = snapshot.free_to_node()
-            # Render to a Cairo surface
-            renderer = win.get_native().get_renderer() if hasattr(win.get_native(), 'get_renderer') else None
-            # Fallback: use Gdk.Texture from paintable
-            paintable = win.get_paintable() if hasattr(win, 'get_paintable') else None
-            if paintable is not None:
-                texture = paintable.get_current_image() if hasattr(paintable, 'get_current_image') else None
-                if texture is not None:
-                    texture.save_to_png(path)
-                    return
-            surface.write_to_png(path)
-        except Exception as e:
-            import logging
-            logging.getLogger(__name__).warning("screenshot_to failed: %s", e)
 
     def hide(self) -> None:
         if self._window:
-            self._window.set_visible(False)
+            self._window.hide()
 
     def destroy(self) -> None:
         if self._window:
@@ -128,54 +72,17 @@ class ControlWindow:
     def _ensure_window(self) -> None:
         if self._window is not None:
             return
-        win = Gtk.ApplicationWindow(application=self._app) if self._app is not None else Gtk.Window()
+        if self._app is not None:
+            win = Gtk.ApplicationWindow(application=self._app)
+        else:
+            win = Gtk.Window()
         win.set_title("豆包语音输入法")
         win.set_default_size(440, 360)
         win.set_resizable(False)
-        win.set_destroy_with_parent(True)
-        # Aggressive present: get the display time of the most recent user
-        # input event so the window manager treats this as a real user
-        # activation (Gdk.CURRENT_TIME is 0 and often ignored by
-        # compositors). Also center on the primary monitor.
-        try:
-            from gi.repository import Gdk  # type: ignore
-            display = Gdk.Display.get_default()
-            seat = display.get_default_seat() if display else None
-            time = Gdk.CURRENT_TIME
-            if seat is not None:
-                # Use the latest user-input timestamp so the WM
-                # accepts this as a real "raise to front" request.
-                ev = seat.get_last_event() if hasattr(seat, 'get_last_event') else None
-                if ev is not None and hasattr(ev, 'get_time'):
-                    time = ev.get_time()
-            win.present_with_time(time)
-        except Exception:
-            try:
-                win.present()
-            except Exception:
-                pass
-        # Center on primary monitor (best-effort; ignores position on
-        # wayland but at least we set the default geometry).
-        try:
-            from gi.repository import Gdk  # type: ignore
-            display = Gdk.Display.get_default()
-            if display is not None:
-                monitors = display.get_monitors()
-                if monitors.get_n_items() > 0:
-                    mon = monitors.get_item(0)
-                    geo = mon.get_geometry()
-                    w, h = 440, 360
-                    x = geo.x + (geo.width - w) // 2
-                    y = geo.y + (geo.height - h) // 2
-                    if hasattr(win, "default_size"):
-                        # set_default_size then set_position if available
-                        try:
-                            win.set_default_size(w, h)
-                        except Exception:
-                            pass
-                    _ = (x, y)  # hint for future set_position
-        except Exception:
-            pass
+        win.set_position(Gtk.WindowPosition.CENTER)
+        # Hide instead of destroy on the close button so the user can
+        # re-open via the desktop entry without losing app state.
+        win.connect("delete-event", self._on_delete_event)
 
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         box.set_margin_start(20)
@@ -186,58 +93,45 @@ class ControlWindow:
         # Header: logo + title side by side
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
         header.set_halign(Gtk.Align.START)
-        try:
-            logo_img = Gtk.Image.new_from_file(
-                "/usr/share/icons/hicolor/128x128/apps/doubao-input.png"
-            )
-        except Exception:
-            try:
-                # dev / non-installed fallback: bundled resources path
-                from pathlib import Path
-                here = Path(__file__).resolve().parent
-                bundled = here.parent / "resources" / "logo-128.png"
-                logo_img = Gtk.Image.new_from_file(str(bundled))
-            except Exception:
-                logo_img = None
+        logo_img = self._try_load_logo()
         if logo_img is not None:
-            logo_img.set_pixel_size(64)
-            header.append(logo_img)
+            header.pack_start(logo_img, False, False, 0)
 
         title = Gtk.Label()
         title.set_xalign(0.0)
         title.set_valign(Gtk.Align.CENTER)
         title.set_markup("<b><big>豆包语音输入法</big></b>")
-        header.append(title)
-        box.append(header)
+        header.pack_start(title, False, False, 0)
+        box.pack_start(header, False, False, 0)
 
         self._status_label = Gtk.Label()
         self._status_label.set_xalign(0.0)
-        self._status_label.set_wrap(True)
+        self._status_label.set_line_wrap(True)
         self._status_label.set_selectable(True)
-        box.append(self._status_label)
+        box.pack_start(self._status_label, False, False, 0)
 
         login_btn = Gtk.Button.new_with_label("登录豆包")
         login_btn.connect("clicked", lambda *_: self._on_login())
-        box.append(login_btn)
+        box.pack_start(login_btn, False, False, 0)
 
         check_btn = Gtk.Button.new_with_label("检查麦克风 (输出 RMS)")
         check_btn.connect("clicked", lambda *_: self._on_check_mic())
-        box.append(check_btn)
+        box.pack_start(check_btn, False, False, 0)
 
         # Diagnostic button: inject a fixed string via the same path the
-        # voice pipeline uses. Lets the user verify wl-copy + uinput Ctrl+V
+        # voice pipeline uses. Lets the user verify clipboard + uinput Ctrl+V
         # end-to-end without having to log in first.
         test_btn = Gtk.Button.new_with_label("测试粘贴 (注入 'hello 测试 123')")
         if self._on_test_inject is not None:
             test_btn.connect("clicked", lambda *_: self._on_test_inject())
         else:
             test_btn.set_sensitive(False)
-        box.append(test_btn)
+        box.pack_start(test_btn, False, False, 0)
 
         help = Gtk.Label()
         help.set_xalign(0.0)
         help.set_yalign(0.0)
-        help.set_wrap(True)
+        help.set_line_wrap(True)
         help.set_markup(
             "<small>"
             "<b>使用方式</b>\n"
@@ -249,17 +143,44 @@ class ControlWindow:
             "\n"
             "<b>注意</b>\n"
             "• 终端里需手动 Ctrl+Shift+V\n"
-            "• 凭证保存在 ~/.config/doubao-input/asr_params.json\n"
+            "• 凭证保存在 ~/.config/doubao-input/doubao_params.json\n"
             "</small>"
         )
-        box.append(help)
+        box.pack_start(help, True, True, 0)
 
         quit_btn = Gtk.Button.new_with_label("退出")
         quit_btn.connect("clicked", lambda *_: self._on_quit())
-        box.append(quit_btn)
+        box.pack_start(quit_btn, False, False, 0)
 
-        win.set_child(box)
+        win.add(box)
         self._window = win
+
+    @staticmethod
+    def _try_load_logo() -> Optional[Gtk.Image]:
+        try:
+            img = Gtk.Image.new_from_file(
+                "/usr/share/icons/hicolor/128x128/apps/doubao-input.png"
+            )
+            img.set_pixel_size(64)
+            return img
+        except Exception:
+            pass
+        try:
+            from pathlib import Path
+            here = Path(__file__).resolve().parent
+            bundled = here.parent / "resources" / "logo-128.png"
+            if bundled.exists():
+                img = Gtk.Image.new_from_file(str(bundled))
+                img.set_pixel_size(64)
+                return img
+        except Exception:
+            pass
+        return None
+
+    def _on_delete_event(self, window, _event) -> bool:
+        # True = "we handled it; don't actually destroy the window".
+        window.hide()
+        return True
 
     def _on_status_changed(self, *_args) -> None:
         self._refresh_status()
