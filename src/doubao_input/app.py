@@ -23,7 +23,7 @@ from gi.repository import GLib, Gtk  # type: ignore
 from doubao_input.doubao.app_state import AppState, LoginStatus, RecordingState
 from doubao_input.doubao.asr_client import ASRClient
 from doubao_input.doubao.audio_capture import AudioCapture
-from doubao_input.doubao.config import PASTE_DELAY
+from doubao_input.doubao.config import INJECT_USE_SHIFT, PASTE_DELAY
 from doubao_input.doubao.params_store import ParamsStore
 from doubao_input.doubao.transcription import TranscriptionManager
 from doubao_input.inject.injector import Injector
@@ -201,7 +201,7 @@ class DoubaoInputApp(Gtk.Application):
 
         def do_inject():
             logger.info("_do_paste: now injecting %r", text[:30])
-            ok = self._injector.inject(text, use_shift=False)
+            ok = self._injector.inject(text, use_shift=INJECT_USE_SHIFT)
             logger.info("_do_paste: injector.inject returned %s", ok)
             # Restore control window
             def restore_control():

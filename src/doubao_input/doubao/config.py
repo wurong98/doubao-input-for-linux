@@ -76,6 +76,17 @@ DEBOUNCE_INTERVAL = 0.3  # seconds
 PASTE_DELAY = 0.05  # seconds between copy and paste simulation
 AUTH_EXPIRY_DELAY = 2.0  # seconds before resetting after auth error
 
+# --- Paste shortcut ---
+# True  -> synthesize Ctrl+Shift+V. Works in GNOME Terminal, Konsole,
+#          Alacritty, kitty, xfce4-terminal, VSCode, gedit, Chromium, ...
+# False -> synthesize Ctrl+V. Works in GUI apps (VSCode, gedit, browser)
+#          but NOT in terminals (terminals treat Ctrl+V as the tty "lnext"
+#          literal-next-char escape, inherited from readline's history).
+# Default is True because we inject plain text and Ctrl+Shift+V is the
+# Wayland/GNOME convention; flip to False if a specific GUI app refuses
+# to accept the paste.
+INJECT_USE_SHIFT = True
+
 # --- Overlay UI ---
 
 OVERLAY_WIDTH = 760
