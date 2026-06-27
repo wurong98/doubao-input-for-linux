@@ -32,6 +32,7 @@ PASTE_DELAY = 0.08  # seconds
 # Linux keycodes (from linux/input-event-codes.h)
 KEY_LEFTCTRL = 29
 KEY_V = 47
+KEY_LEFTSHIFT = 42
 
 
 class Injector:
@@ -100,8 +101,16 @@ class Injector:
             return self._ui
         import evdev  # type: ignore
 
+        # IMPORTANT: declare every keycode we may ever emit, INCLUDING
+        # KEY_LEFTSHIFT. The uinput protocol silently drops events for
+        # keycodes that were not advertised at device-create time. If
+        # LEAVING_SHIFT_OUT, the Ctrl+Shift+V path degenerates into
+        # Ctrl+V — terminals then swallow it as VLNEXT (^V) and paste
+        # never happens.
         self._ui = evdev.UInput(
-            events={evdev.ecodes.EV_KEY: [KEY_LEFTCTRL, KEY_V]},
+            events={
+                evdev.ecodes.EV_KEY: [KEY_LEFTCTRL, KEY_LEFTSHIFT, KEY_V],
+            },
             name="doubao-input-virtual-kbd",
         )
         logger.info("uinput virtual keyboard created")
@@ -113,7 +122,6 @@ class Injector:
             ui = self._get_uinput()
             import evdev  # type: ignore
             import time as _t
-            KEY_LEFTSHIFT = 42
             # Some receivers (notably GTK apps and terminals) need
             # measurable time between key events; otherwise the
             # press-release sequence gets coalesced into nothing and
