@@ -50,37 +50,6 @@ class ControlWindow:
         self._ensure_window()
         self._window.present()
         self._refresh_status()
-        # DEBUG: introspect our own toplevel state to prove we're actually mapped
-        import logging
-        import time
-        log = logging.getLogger(__name__)
-        try:
-            time.sleep(0.4)
-            win = self._window
-            w = win.get_width()
-            h = win.get_height()
-            mapped = win.get_mapped() if hasattr(win, "get_mapped") else "?"
-            visible = win.get_visible() if hasattr(win, "get_visible") else "?"
-            title = win.get_title()
-            surface = win.get_surface()
-            scale = surface.get_scale_factor() if surface else "?"
-            log.warning(
-                "WINDOW_STATE w=%d h=%d mapped=%s visible=%s title=%r scale=%s",
-                w, h, mapped, visible, title, scale,
-            )
-            # Try to ask the compositor about the toplevel we own.
-            try:
-                toplevel = None
-                if hasattr(win, "get_toplevel"):
-                    toplevel = win.get_toplevel()
-                native = win.get_native()
-                log.warning("WINDOW_NATIVE class=%s has_toplevel=%s",
-                            type(native).__name__ if native else None,
-                            toplevel is not None)
-            except Exception as e:
-                log.warning("WINDOW_NATIVE err: %s", e)
-        except Exception as e:
-            log.warning("window introspection failed: %s", e)
 
     def _screenshot_to(self, path: str) -> None:
         """Render this window's surface to a PNG using GTK's paint API.
