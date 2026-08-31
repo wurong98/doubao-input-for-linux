@@ -47,6 +47,7 @@ AUTH_ERROR_KEYWORDS = [
 CONFIG_DIR_NAME = "doubao-input"
 PARAMS_FILE = "asr_params.json"
 KEYBOARD_FILE = "keyboard.json"
+AUDIO_FILE = "audio.json"
 
 
 def get_config_dir() -> Path:
@@ -67,6 +68,9 @@ def get_params_path() -> Path:
 def get_keyboard_config_path() -> Path:
     """Get the path to the on-screen keyboard geometry JSON file."""
     return get_config_dir() / KEYBOARD_FILE
+
+def get_audio_config_path() -> Path:
+    return get_config_dir() / AUDIO_FILE
 
 
 # --- Timeouts ---

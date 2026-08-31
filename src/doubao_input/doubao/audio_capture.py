@@ -24,11 +24,12 @@ logger = logging.getLogger(__name__)
 class AudioCapture:
     """Captures microphone audio at 16kHz mono Int16 PCM."""
 
-    def __init__(self) -> None:
+    def __init__(self, device: int | None = None) -> None:
         self._stream: Any | None = None
         self._on_audio_data = None  # callback: (bytes) -> None
         self._on_rms = None        # callback: (float in [0,1]) -> None
         self._lock = threading.Lock()
+        self.device = device
 
     @property
     def is_capturing(self) -> bool:
@@ -42,6 +43,18 @@ class AudioCapture:
         self._on_audio_data = on_audio_data
 
         sd = _load_sounddevice()
+        device = self.device
+        if device is None:
+            for info in self.list_input_devices():
+                name = str(info.get("name", "")).lower()
+                if "pipewire" in name or "pulse" in name:
+                    try:
+                        sd.check_input_settings(device=info["index"], samplerate=AUDIO_SAMPLE_RATE,
+                                                channels=AUDIO_CHANNELS, dtype="int16")
+                        device = info["index"]
+                        break
+                    except Exception:
+                        continue
         # sounddevice with PortAudio uses PulseAudio compat on PipeWire
         self._stream = sd.RawInputStream(
             samplerate=AUDIO_SAMPLE_RATE,
@@ -50,6 +63,7 @@ class AudioCapture:
             blocksize=AUDIO_BLOCKSIZE,
             callback=self._audio_callback,
             latency="low",
+            device=device,
         )
         self._stream.start()
         logger.info(
@@ -57,6 +71,11 @@ class AudioCapture:
             AUDIO_SAMPLE_RATE,
             AUDIO_CHANNELS,
         )
+
+    def set_device(self, device: int | None) -> None:
+        if self.is_capturing:
+            raise RuntimeError("cannot change audio device while capturing")
+        self.device = device
 
     def stop(self) -> None:
         """Stop capturing."""
@@ -99,9 +118,15 @@ class AudioCapture:
 
     @staticmethod
     def list_input_devices():
-        """List available input devices for debugging."""
+        """List input devices with stable PortAudio indices."""
         sd = _load_sounddevice()
-        return sd.query_devices(kind="input")
+        result = []
+        for index, info in enumerate(sd.query_devices()):
+            if info.get("max_input_channels", 0) > 0:
+                item = dict(info)
+                item["index"] = index
+                result.append(item)
+        return result
 
     @staticmethod
     def get_default_input_device():
