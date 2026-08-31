@@ -188,34 +188,10 @@ class DoubaoInputApp(Gtk.Application):
                 self._overlay._window.set_visible(False)
             except Exception:
                 pass
-        # Track whether we had to forcibly hide the control window so
-        # we can restore it after the paste.
-        control_was_visible = False
-        if self._control and self._control._window:
-            try:
-                control_was_visible = self._control._window.get_visible()
-                if control_was_visible:
-                    self._control._window.set_visible(False)
-            except Exception:
-                control_was_visible = False
-
         def do_inject():
             logger.info("_do_paste: now injecting %r", text[:30])
             ok = self._injector.inject(text, use_shift=INJECT_USE_SHIFT)
             logger.info("_do_paste: injector.inject returned %s", ok)
-            # Restore control window
-            def restore_control():
-                if (
-                    control_was_visible
-                    and self._control
-                    and self._control._window
-                ):
-                    try:
-                        self._control._window.set_visible(True)
-                    except Exception:
-                        pass
-                return GLib.SOURCE_REMOVE
-            GLib.timeout_add(600, restore_control)
             return GLib.SOURCE_REMOVE
 
         # Wait for the right-Ctrl physical release + the compositor to
