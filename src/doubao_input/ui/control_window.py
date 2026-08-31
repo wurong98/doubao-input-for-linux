@@ -13,6 +13,9 @@ from __future__ import annotations
 
 import logging
 from typing import Callable, Optional
+import json
+from doubao_input.doubao.audio_capture import AudioCapture
+from doubao_input.doubao.config import get_audio_config_path
 
 import gi
 
@@ -32,6 +35,7 @@ class ControlWindow:
         on_quit_clicked: Callable[[], None],
         on_check_mic_clicked: Callable[[], None],
         on_test_inject_clicked: Optional[Callable[[], None]] = None,
+        on_audio_device_changed: Optional[Callable[[int | None], None]] = None,
         app: Optional[Gtk.Application] = None,
     ) -> None:
         self._app_state = app_state
@@ -39,9 +43,12 @@ class ControlWindow:
         self._on_quit = on_quit_clicked
         self._on_check_mic = on_check_mic_clicked
         self._on_test_inject = on_test_inject_clicked
+        self._on_audio_device_changed = on_audio_device_changed
         self._app = app
         self._window: Optional[Gtk.Window] = None
         self._status_label: Optional[Gtk.Label] = None
+        self._device_dropdown = None
+        self._devices = []
         self._app_state.connect("login-status-changed", self._on_status_changed)
 
     # ---- public ----
@@ -220,6 +227,14 @@ class ControlWindow:
         login_btn.connect("clicked", lambda *_: self._on_login())
         box.append(login_btn)
 
+        device_label = Gtk.Label(label="输入设备")
+        device_label.set_xalign(0.0)
+        box.append(device_label)
+        self._device_dropdown = Gtk.DropDown.new_from_strings([])
+        box.append(self._device_dropdown)
+        self._populate_devices()
+        self._device_dropdown.connect("notify::selected", self._on_device_selected)
+
         check_btn = Gtk.Button.new_with_label("检查麦克风 (输出 RMS)")
         check_btn.connect("clicked", lambda *_: self._on_check_mic())
         box.append(check_btn)
@@ -260,6 +275,35 @@ class ControlWindow:
 
         win.set_child(box)
         self._window = win
+
+    def _populate_devices(self) -> None:
+        if self._device_dropdown is None:
+            return
+        try:
+            devices = AudioCapture.list_input_devices()
+        except Exception as e:
+            logger.warning("cannot enumerate input devices: %s", e)
+            devices = []
+        self._devices = list(devices) if isinstance(devices, (list, tuple)) else []
+        labels = ["自动（推荐）"] + [str(d.get("name", "未知设备")) for d in self._devices]
+        self._device_dropdown.set_model(Gtk.StringList.new(labels))
+        selected = None
+        try:
+            selected = json.loads(get_audio_config_path().read_text()).get("device")
+        except Exception:
+            pass
+        index = next((i + 1 for i, d in enumerate(self._devices) if d.get("index") == selected), 0)
+        self._device_dropdown.set_selected(index)
+
+    def _on_device_selected(self, dropdown, _pspec) -> None:
+        index = dropdown.get_selected()
+        device = None if index == 0 or index > len(self._devices) else self._devices[index - 1].get("index")
+        try:
+            get_audio_config_path().write_text(json.dumps({"device": device}), encoding="utf-8")
+            if self._on_audio_device_changed:
+                self._on_audio_device_changed(device)
+        except Exception as e:
+            logger.warning("failed to save audio device: %s", e)
 
     def _on_status_changed(self, *_args) -> None:
         self._refresh_status()

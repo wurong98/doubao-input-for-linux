@@ -24,6 +24,8 @@ from doubao_input.doubao.app_state import AppState, LoginStatus, RecordingState
 from doubao_input.doubao.asr_client import ASRClient
 from doubao_input.doubao.audio_capture import AudioCapture
 from doubao_input.doubao.config import INJECT_USE_SHIFT, PASTE_DELAY
+from doubao_input.doubao.config import get_audio_config_path
+import json
 from doubao_input.doubao.params_store import ParamsStore
 from doubao_input.doubao.transcription import TranscriptionManager
 from doubao_input.inject.injector import Injector
@@ -95,6 +97,11 @@ class DoubaoInputApp(Gtk.Application):
         # Replace its audio_capture with our instance so we can wire RMS
         from doubao_input.doubao.audio_capture import AudioCapture
         self._audio_capture = AudioCapture()
+        try:
+            saved_device = json.loads(get_audio_config_path().read_text()).get("device")
+            self._audio_capture.set_device(saved_device)
+        except Exception:
+            pass
         tm.audio_capture = self._audio_capture
 
         # Wrap start() so that on every recording, RMS is piped to the
@@ -128,6 +135,7 @@ class DoubaoInputApp(Gtk.Application):
             on_quit_clicked=self._quit,
             on_check_mic_clicked=self._check_mic,
             on_test_inject_clicked=self._test_inject,
+            on_audio_device_changed=self._on_audio_device_changed,
             app=self,
         )
 
@@ -313,6 +321,12 @@ class DoubaoInputApp(Gtk.Application):
 
         GLib.timeout_add(3000, stop_and_report)
         GLib.timeout_add(4500, lambda: self._overlay.hide() or False)
+
+    def _on_audio_device_changed(self, device: int | None) -> None:
+        try:
+            self._audio_capture.set_device(device)
+        except Exception as e:
+            logger.warning("audio device change failed: %s", e)
 
     def _quit(self) -> None:
         if self._tm and self.app_state.recording_state != RecordingState.IDLE:
