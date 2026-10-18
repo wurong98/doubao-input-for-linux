@@ -28,7 +28,7 @@
 
 - **按住即说,松手即输** —— push-to-hold 交互,右 Ctrl 物理键触发。
 - **GNOME / Wayland 原生可用** —— 用 `evdev` 监听 + `uinput` 模拟,不依赖 X11/XWayland。
-- **中文 OK** —— 走剪贴板 + 模拟 Ctrl+V,不靠逐键输入。
+- **中文 OK** —— 走剪贴板 + 模拟 Ctrl+Shift+V,不靠逐键输入。
 - **圆角胶囊悬浮窗** —— 18px 圆角 + 1.5px 白边 + 呼吸 alpha(0.78~0.98 / 2.4s 周期)
   + 每识别出新字触发 220ms 流光闪烁;文字始终纯白粗体不参与动效,保证可读。
 - **会话常驻** —— `systemd --user` 自启;再次启动唤起控制窗口(单实例)。
@@ -121,7 +121,7 @@ JS 拦截到登录态,自动从 `/alice/profile/self` 抓 cookies + 从 `localSt
 之后按下右 Ctrl 即可:
 
 - **按下**:弹出波形胶囊悬浮窗,实时显示识别文字
-- **松开**:等待 1s 安全超时(收齐末尾识别结果),把文字 `wl-copy` 写剪贴板 + `uinput` 发 Ctrl+V → 落入当前输入框
+- **松开**:等待 1s 安全超时(收齐末尾识别结果),把文字 `wl-copy` 写剪贴板 + `uinput` 发 Ctrl+Shift+V → 落入当前输入框
 - **按住 <150ms**:视为误触,取消,不注入
 
 ---
@@ -145,7 +145,7 @@ src/doubao_input/
 │   └── host_tools.py        wl-copy / xclip 候选命令
 │
 ├── trigger/evdev_ptt.py   ← 自研:右 Ctrl 物理键监听
-├── inject/injector.py     ← 自研:wl-copy + uinput Ctrl+V
+├── inject/injector.py     ← 自研:wl-copy + uinput Ctrl+Shift+V
 ├── login/resources/        注入到 WebView 的 JS
 └── ui/                    ← 自研:界面
     ├── overlay.py          顶部波形胶囊悬浮窗
@@ -182,7 +182,7 @@ EvdevPtt started on N device(s)
 WS open, 开始录…
 result: 今天天气怎么样
 clipboard: wl-copy ok
-paste: uinput ok (shift=False, gap=12ms)
+paste: uinput ok (shift=True, gap=12ms)
 ```
 
 调试:把 `logging.basicConfig(level=logging.DEBUG)` 改成 DEBUG 即可看到 evdev 设备扫描等细节。
@@ -219,8 +219,8 @@ systemctl --user enable --now doubao-input.service  # 开机自启
 
 ## ⚠️ 已知限制
 
-- **终端粘贴需 Ctrl+Shift+V**:Wayland 下拿不到前台窗口类名,v1 默认 Ctrl+V;终端里若粘贴失败,
-  文字仍在剪贴板,可手动 Ctrl+Shift+V。终端模式作为后续可配置开关。
+- **粘贴快捷键兼容性**:默认自动发送 Ctrl+Shift+V,支持终端中的 Codex CLI。若某个应用不支持此快捷键,
+  可将 `doubao/config.py` 中的 `INJECT_USE_SHIFT` 改为 `False`,使用 Ctrl+V。
 - **托盘在 GNOME 48 默认不可见**:GNOME 48 默认不显示 StatusNotifierItem 托盘,
   需 AppIndicator 扩展;否则静默降级,功能不受影响,引导用控制窗口。
 - **豆包接口变动风险**:豆包 Web 版接口一旦变更,ASR 会失效;凭证失效会触发自动重登。

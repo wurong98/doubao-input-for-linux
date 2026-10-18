@@ -248,7 +248,7 @@ class ControlWindow:
             "<b>取消</b>:在录音中按 ESC 或在悬浮胶囊上点取消\n"
             "\n"
             "<b>注意</b>\n"
-            "• 终端里需手动 Ctrl+Shift+V\n"
+            "• 终端里自动使用 Ctrl+Shift+V 粘贴\n"
             "• 凭证保存在 ~/.config/doubao-input/asr_params.json\n"
             "</small>"
         )
