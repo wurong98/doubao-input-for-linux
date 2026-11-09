@@ -71,7 +71,7 @@ def get_keyboard_config_path() -> Path:
 
 # --- Timeouts ---
 
-STOP_SAFETY_TIMEOUT = 1.0  # seconds
+STOP_SAFETY_TIMEOUT = 2.5  # seconds; 服务端回最终结果偶经代理慢于 1s
 DEBOUNCE_INTERVAL = 0.3  # seconds
 PASTE_DELAY = 0.05  # seconds between copy and paste simulation
 AUTH_EXPIRY_DELAY = 2.0  # seconds before resetting after auth error

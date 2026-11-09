@@ -196,6 +196,11 @@ class TranscriptionManager:
         # error (connection refused, timeout, DNS, proxy down, etc.) must NOT be
         # treated as auth failure — doing so wipes cached cookies and pops the
         # login window every time the network/proxy is unavailable.
+        # 连接中途死掉时，已识别的半截文本照常贴出，不让整段语音白说。
+        if self.app_state.transcription_text.strip():
+            logger.info("ASR error mid-utterance, pasting partial text")
+            self._complete_transcription()
+            return GLib.SOURCE_REMOVE
         self.app_state.error_message = "连接出错,请检查网络后重试"
         GLib.timeout_add(int(AUTH_EXPIRY_DELAY * 1000), self._reset_to_idle)
         return GLib.SOURCE_REMOVE

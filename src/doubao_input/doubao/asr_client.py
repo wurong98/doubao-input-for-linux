@@ -89,6 +89,12 @@ class ASRClient:
                 open_timeout=5,
                 close_timeout=3,
                 max_size=2**20,
+                # 豆包网关模拟网页端：浏览器从不主动发 WS ping，
+                # 服务端也不回 pong。默认 ping_interval=20/ping_timeout=20
+                # 会让客户端在第 ~40 秒自己掐断连接（1011 keepalive ping
+                # timeout），表现为长录音中途突然断掉。禁用客户端
+                # keepalive 与真实浏览器行为一致。
+                ping_interval=None,
                 **header_kwargs,
             ) as ws:
                 self._ws = ws
