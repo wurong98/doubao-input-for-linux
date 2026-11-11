@@ -13,12 +13,13 @@ from __future__ import annotations
 
 import logging
 import os
+import subprocess
 import sys
 
 import gi
 
 gi.require_version("Gtk", "4.0")
-from gi.repository import GLib, Gtk  # type: ignore
+from gi.repository import Gio, GLib, Gtk  # type: ignore
 
 from doubao_input.doubao.app_state import AppState, LoginStatus, RecordingState
 from doubao_input.doubao.asr_client import ASRClient
@@ -30,6 +31,7 @@ from doubao_input.inject.injector import Injector
 from doubao_input.trigger.evdev_ptt import EvdevPtt
 from doubao_input.ui.control_window import ControlWindow
 from doubao_input.ui.overlay import Overlay
+from doubao_input.ui.tray import start_tray
 
 logger = logging.getLogger(__name__)
 
@@ -54,31 +56,41 @@ class DoubaoInputApp(Gtk.Application):
         self._tm: TranscriptionManager | None = None
         self._injector: Injector | None = None
         self._last_press_at: float = 0.0
+        self._tray_process = None
+        self._previous_recording_state = RecordingState.IDLE.value
+        self._startup_timer = None
+        self._feedback_timer = None
+        self.app_state.connect("recording-state-changed", self._on_recording_state_changed)
+        for name, callback in (("show-control", self._on_activate),
+                               ("quit", lambda *_: self._quit())):
+            action = Gio.SimpleAction.new(name, None)
+            action.connect("activate", lambda _action, _parameter, cb=callback: cb(self))
+            self.add_action(action)
 
     # ---- Gtk.Application hooks (signal handlers, not do_*) ----
 
     def _on_activate(self, _app) -> None:
         logger.info("on_activate: setup_done=%s", self._setup_done)
-        if not self._setup_done:
+        first_activation = not self._setup_done
+        if first_activation:
             self._setup_done = True
             self._build()
-        if self._control:
+            # 后台启动时没有控制窗口，也必须保留应用事件循环。
+            self.hold()
+        background_start = first_activation and os.environ.get("DOUBAO_INPUT_BACKGROUND") == "1"
+        if self._control and not background_start:
             self._control.show()
-        # Boot-time proof-of-life: briefly flash the floating overlay so
-        # the user can see *something* from this app even before they log
-        # in. This is the "弹出输入法" signal. Hide it 3 seconds later.
-        from gi.repository import GLib
-        GLib.timeout_add(400, self._boot_flash_overlay)
-
-    def _boot_flash_overlay(self) -> bool:
-        if self._overlay is None:
-            return False
-        self._overlay.show("豆包输入法已启动 · 请登录或按住右 Ctrl 说话")
-        GLib.timeout_add_seconds(3, lambda: (self._overlay.hide(), False)[1])
-        return False
 
     def _on_shutdown(self, _app) -> None:
         logger.info("shutting down")
+        if self._tray_process is not None:
+            self._tray_process.terminate()
+            try:
+                self._tray_process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                self._tray_process.kill()
+                self._tray_process.wait()
+            self._tray_process = None
         if self._ptt:
             self._ptt.stop()
         if self._injector:
@@ -102,8 +114,10 @@ class DoubaoInputApp(Gtk.Application):
         # class globally.
         _ac_orig_start = self._audio_capture.start
         def _start_with_rms(on_audio_data):
+            # 麦克风测试有自己的统计回调，不能被波形回调覆盖。
+            if self._audio_capture._on_rms is None:
+                self._audio_capture._on_rms = self._overlay.push_rms
             _ac_orig_start(on_audio_data)
-            self._audio_capture._on_rms = self._overlay.push_rms
         self._audio_capture.start = _start_with_rms  # type: ignore[assignment]
         _ac_orig_stop = self._audio_capture.stop
         def _stop_clear_rms():
@@ -147,6 +161,7 @@ class DoubaoInputApp(Gtk.Application):
             logger.warning("evdev PTT failed to start; will retry in background")
             # Don't block; user can still open the control window to diagnose.
 
+        self._tray_process = start_tray()
         logger.info("build complete")
 
     # ---- PTT callbacks (run on GTK main thread) ----
@@ -171,6 +186,44 @@ class DoubaoInputApp(Gtk.Application):
     def _on_ptt_error(self, msg: str) -> None:
         logger.warning("PTT error: %s", msg)
 
+    def _show_feedback(self, message: str) -> bool:
+        if self.app_state.recording_state != RecordingState.IDLE:
+            return GLib.SOURCE_REMOVE
+        self._overlay.show(message)
+        def hide():
+            self._feedback_timer = None
+            self._overlay.hide()
+            return GLib.SOURCE_REMOVE
+        self._feedback_timer = GLib.timeout_add(2500, hide)
+        return GLib.SOURCE_REMOVE
+
+    def _on_recording_state_changed(self, _state, value: str) -> None:
+        previous = self._previous_recording_state
+        self._previous_recording_state = value
+        if self._startup_timer is not None:
+            GLib.source_remove(self._startup_timer)
+            self._startup_timer = None
+        if self._feedback_timer is not None:
+            GLib.source_remove(self._feedback_timer)
+            self._feedback_timer = None
+        if value == RecordingState.STARTING.value:
+            def startup_timeout():
+                self._startup_timer = None
+                if self.app_state.recording_state == RecordingState.STARTING:
+                    self._tm.handle_cancel()
+                    self._show_feedback("识别服务连接超时，请重试")
+                return GLib.SOURCE_REMOVE
+            self._startup_timer = GLib.timeout_add(8000, startup_timeout)
+        elif value == RecordingState.RECORDING.value:
+            self._overlay.set_status("正在聆听，请说话…")
+        elif value == RecordingState.STOPPING.value:
+            self._overlay.set_status("正在识别…")
+        elif (value == RecordingState.IDLE.value
+              and previous == RecordingState.STOPPING.value
+              and not self.app_state.transcription_text.strip()):
+            # reset_to_idle 会先隐藏浮窗，下一轮再显示明确的空结果反馈。
+            GLib.idle_add(self._show_feedback, "未识别到语音，请重试")
+
     # ---- Paste ----
 
     def _do_paste(self, text: str) -> None:
@@ -188,34 +241,14 @@ class DoubaoInputApp(Gtk.Application):
                 self._overlay._window.set_visible(False)
             except Exception:
                 pass
-        # Track whether we had to forcibly hide the control window so
-        # we can restore it after the paste.
-        control_was_visible = False
-        if self._control and self._control._window:
-            try:
-                control_was_visible = self._control._window.get_visible()
-                if control_was_visible:
-                    self._control._window.set_visible(False)
-            except Exception:
-                control_was_visible = False
+        # 听写只负责把文字送回用户输入框，不在结束后重新弹出面板。
+        if self._control:
+            self._control.hide()
 
         def do_inject():
             logger.info("_do_paste: now injecting %r", text[:30])
             ok = self._injector.inject(text, use_shift=INJECT_USE_SHIFT)
             logger.info("_do_paste: injector.inject returned %s", ok)
-            # Restore control window
-            def restore_control():
-                if (
-                    control_was_visible
-                    and self._control
-                    and self._control._window
-                ):
-                    try:
-                        self._control._window.set_visible(True)
-                    except Exception:
-                        pass
-                return GLib.SOURCE_REMOVE
-            GLib.timeout_add(600, restore_control)
             return GLib.SOURCE_REMOVE
 
         # Wait for the right-Ctrl physical release + the compositor to

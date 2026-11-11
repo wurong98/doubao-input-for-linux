@@ -133,6 +133,7 @@ class ControlWindow:
         win.set_default_size(440, 360)
         win.set_resizable(False)
         win.set_destroy_with_parent(True)
+        win.connect("close-request", self._on_close_request)
         # Aggressive present: get the display time of the most recent user
         # input event so the window manager treats this as a real user
         # activation (Gdk.CURRENT_TIME is 0 and often ignored by
@@ -248,6 +249,9 @@ class ControlWindow:
             "<b>取消</b>:在录音中按 ESC 或在悬浮胶囊上点取消\n"
             "\n"
             "<b>注意</b>\n"
+            "• 点击右上角关闭只隐藏窗口，右 Ctrl 仍然可用\n"
+            "• 从顶栏图标或应用启动器重新打开控制窗口\n"
+            "• 点击「退出」才会停止语音输入\n"
             "• 终端里需手动 Ctrl+Shift+V\n"
             "• 凭证保存在 ~/.config/doubao-input/asr_params.json\n"
             "</small>"
@@ -260,6 +264,11 @@ class ControlWindow:
 
         win.set_child(box)
         self._window = win
+
+    def _on_close_request(self, _window) -> bool:
+        # 关闭面板不等于退出后台语音服务；退出仍由明确的菜单/按钮执行。
+        self.hide()
+        return True
 
     def _on_status_changed(self, *_args) -> None:
         self._refresh_status()

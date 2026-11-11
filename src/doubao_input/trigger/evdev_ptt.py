@@ -15,6 +15,7 @@ leave us listening on a stale fd.
 """
 from __future__ import annotations
 
+import errno
 import logging
 import os
 import select
@@ -59,15 +60,14 @@ class EvdevPtt:
 
     def start(self) -> bool:
         """Start the listener thread. Returns False if no accessible devices."""
-        if not self._scan():
-            return False
+        available = self._scan()
         self._stop.clear()
         self._thread = threading.Thread(
             target=self._run, name="evdev-ptt", daemon=True
         )
         self._thread.start()
         logger.info("EvdevPtt started on %d device(s)", len(self._fds))
-        return True
+        return available
 
     def stop(self) -> None:
         self._stop.set()
@@ -84,27 +84,44 @@ class EvdevPtt:
         """Open every /dev/input/event* that we can read AND that supports KEY_RIGHTCTRL."""
         import evdev  # type: ignore
 
-        self._close_fds()
-        fds: list[int] = []
-        paths: list[str] = []
-        # evdev.list_devices() returns paths the process can actually open.
+        # 保留仍有效的设备；设备节点被重建时，即使路径相同也必须重开。
+        for fd, path in list(zip(self._fds, self._paths)):
+            try:
+                current, opened = os.stat(path), os.fstat(fd)
+                if (current.st_ino, current.st_rdev) != (opened.st_ino, opened.st_rdev):
+                    self._drop_fd(fd)
+            except OSError:
+                self._drop_fd(fd)
         for path in evdev.list_devices():
+            if path in self._paths:
+                continue
             try:
                 dev = evdev.InputDevice(path)
-                caps = dev.capabilities()
-                if EV_KEY in caps and KEY_RIGHTCTRL in caps[EV_KEY]:
+                try:
+                    caps = dev.capabilities()
+                    if KEY_RIGHTCTRL not in caps.get(EV_KEY, []):
+                        continue
                     fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
-                    fds.append(fd)
-                    paths.append(path)
+                finally:
+                    dev.close()
+                self._fds.append(fd)
+                self._paths.append(path)
+                logger.info("PTT keyboard connected: %s", path)
             except (PermissionError, FileNotFoundError, OSError) as e:
                 logger.debug("Skip %s: %s", path, e)
-                continue
-            except Exception as e:
-                logger.debug("Skip %s: %s", path, e)
-                continue
-        self._fds = fds
-        self._paths = paths
-        return bool(fds)
+        return bool(self._fds)
+
+    def _drop_fd(self, fd: int) -> None:
+        if fd not in self._fds:
+            return
+        index = self._fds.index(fd)
+        path = self._paths.pop(index)
+        self._fds.pop(index)
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        logger.info("PTT keyboard disconnected: %s", path)
 
     def _close_fds(self) -> None:
         for fd in self._fds:
@@ -125,14 +142,10 @@ class EvdevPtt:
                 now = time.monotonic()
                 if now - self._last_rescan > self._rescan_interval:
                     self._last_rescan = now
-                    if not self._fds:
-                        if not self._scan():
-                            self._notify_error("无可访问的 /dev/input/event* 设备")
-                            time.sleep(2.0)
-                            continue
+                    self._scan()
 
                 if not self._fds:
-                    time.sleep(0.2)
+                    self._stop.wait(0.2)
                     continue
 
                 try:
@@ -144,7 +157,14 @@ class EvdevPtt:
                 for fd in rlist:
                     try:
                         data = os.read(fd, _EVENT_SIZE * 16)
-                    except OSError:
+                    except OSError as exc:
+                        if exc.errno not in (errno.EAGAIN, errno.EWOULDBLOCK, errno.EINTR):
+                            self._drop_fd(fd)
+                            self._last_rescan = 0.0
+                        continue
+                    if not data:
+                        self._drop_fd(fd)
+                        self._last_rescan = 0.0
                         continue
                     buf = data
                     self._dispatch(buf, GLib.idle_add)

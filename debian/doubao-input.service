@@ -14,6 +14,7 @@ RestartSec=3
 Environment=DISPLAY=:0
 Environment=GDK_BACKEND=wayland,x11
 Environment=PYTHONUNBUFFERED=1
+Environment=DOUBAO_INPUT_BACKGROUND=1
 
 [Install]
 WantedBy=default.target
