@@ -34,6 +34,26 @@ from doubao_input.ui.overlay import Overlay
 logger = logging.getLogger(__name__)
 
 
+def _bind_capture_rms(capture, default_on_rms):
+    """把默认的波形回调绑定到 ``AudioCapture.start`` 上。
+
+    两个要点:
+
+    1. ``_on_rms`` 必须在启动采集**之前**设置。PortAudio 的回调线程在
+       ``start()`` 返回后立刻就可能投递数据,先启动再赋值会丢掉第一块。
+    2. 调用方显式传入 ``on_rms`` 时必须保留调用方的回调,不能覆盖。
+       「检查麦克风」就是靠这个回调统计音量;旧实现无条件覆盖成
+       ``overlay.push_rms``,导致麦克风采集正常却永远报「无数据」。
+    """
+    original_start = capture.start
+
+    def start_with_default_rms(on_audio_data, on_rms=None):
+        capture._on_rms = on_rms if on_rms is not None else default_on_rms
+        original_start(on_audio_data)
+
+    return start_with_default_rms
+
+
 class DoubaoInputApp(Gtk.Application):
     def __init__(self) -> None:
         super().__init__(
@@ -99,12 +119,10 @@ class DoubaoInputApp(Gtk.Application):
 
         # Wrap start() so that on every recording, RMS is piped to the
         # overlay (waveform). Wrapping is safer than monkey-patching the
-        # class globally.
-        _ac_orig_start = self._audio_capture.start
-        def _start_with_rms(on_audio_data):
-            _ac_orig_start(on_audio_data)
-            self._audio_capture._on_rms = self._overlay.push_rms
-        self._audio_capture.start = _start_with_rms  # type: ignore[assignment]
+        # class globally. 调用方传了 on_rms(如「检查麦克风」)时保留它的回调。
+        self._audio_capture.start = _bind_capture_rms(
+            self._audio_capture, self._overlay.push_rms
+        )  # type: ignore[assignment]
         _ac_orig_stop = self._audio_capture.stop
         def _stop_clear_rms():
             _ac_orig_stop()
@@ -291,18 +309,18 @@ class DoubaoInputApp(Gtk.Application):
             captured.append(rms)
             self._overlay.push_rms(rms)
 
-        # Hook RMS for the test (we restore it after stop)
-        cap._on_rms = on_rms_test
+        # 显式传 on_rms:启动包装器不会覆盖调用方的回调。
+        # (旧实现先手写 cap._on_rms,再调用无条件覆盖 _on_rms 的包装器,
+        #  captured 永远为空 -> 误报「无数据」。)
         try:
-            cap.start(on_audio_data=lambda b: None)
+            cap.start(on_audio_data=lambda b: None, on_rms=on_rms_test)
         except Exception as e:
             self._overlay.set_text(f"麦克风启动失败: {e}")
             GLib.timeout_add(1500, lambda: self._overlay.hide() or False)
             return
 
         def stop_and_report():
-            cap.stop()
-            cap._on_rms = None  # restore
+            cap.stop()  # stop() 内部会把 _on_rms 置空
             if captured:
                 peak = max(captured)
                 avg = sum(captured) / len(captured)
